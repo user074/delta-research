@@ -1,43 +1,42 @@
-# REPORT — {{RUN_ID}}
+# REPORT — (run ID)
 
 ## Result
 | Metric | Baseline | Observed | Δ | Notes |
 |--------|----------|----------|---|-------|
-| {{METRIC}} | {{BASELINE}} | {{OBSERVED}} | {{DELTA_VALUE}} | {{NOTES}} |
+| (metric) | (baseline) | (observed) | (change) | (notes) |
 
 ## Signal
-- **score**: {{SIGNAL_SCORE}}
-- {{SIGNAL_BULLET_1}}
-- {{SIGNAL_BULLET_2}}
+- **discrimination**: (discriminating | partial | null)
+- (why — what did we learn or fail to learn?)
+- (key observation)
 
 ## Verdict
 <!-- One of: supports | contradicts | unclear | BLOCKER -->
-**{{VERDICT}}** — {{VERDICT_TARGET_BELIEF}}
+**(verdict)** — belief #N: (how this evidence affects the belief)
 
 ## Confounds
-<!-- What could explain the result other than the delta? -->
-- {{CONFOUND_1}}
+- (what else could explain the result?)
 
 ## Next tests
-<!-- Top 3 deltas this run suggests. Supervisor may add to frontier. -->
-1. {{NEXT_1}}
-2. {{NEXT_2}}
-3. {{NEXT_3}}
+<!-- Top 3 suggested deltas. Say what each would discriminate. -->
+1. (delta + why it would discriminate)
+2. (alternative direction)
+3. (wild card from unexpected observation)
 
 ## Artifacts
-- `artifacts/{{ARTIFACT}}` — {{DESCRIPTION}}
+- `artifacts/(file)` — (description)
 
 ## Errors
-{{ERRORS}}
+(errors or "None")
 
-## Log (abbreviated)
+## Log
 ```
-{{LOG}}
+(key outputs — abbreviated but preserve important details)
 ```
 
 ## Meta
-- **run_id**: {{RUN_ID}}
-- **delta**: {{DELTA}}
-- **started**: {{START_TIME}}
-- **completed**: {{END_TIME}}
-- **status**: {{STATUS}}
+- **run_id**: (R###)
+- **delta**: (what was tested)
+- **started**: (timestamp)
+- **completed**: (timestamp)
+- **status**: (completed | failed | blocked)

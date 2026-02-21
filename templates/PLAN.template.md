@@ -1,43 +1,35 @@
-# PLAN — {{RUN_ID}}
+# PLAN — (run ID)
 
 ## Delta
-- **what changed**: {{WHAT_CHANGED}}
-- **intent**: {{INTENT}}
-- **disambiguates**: {{WHAT_THIS_TESTS}}
-- **type**: {{DELTA_TYPE}}
-
-## Protocol lock
-<!-- These MUST NOT change during execution. If violated, worker must BLOCKER. -->
-- **baseline**: {{BASELINE_REF}}
-- **controlled vars**: {{CONTROLLED_VARS}}
-- **eval method**: {{EVAL_METHOD}}
+- **what**: (what to change or test)
+- **intent**: (why — what we hope to learn)
+- **target belief**: #N — (the belief this should discriminate)
+- **type**: (experiment | analysis | exploration | refactor)
 
 ## Commands
-<!-- Exact steps. Worker executes in order. One command per line. -->
+<!-- Exact steps. Worker executes in order. -->
 ```
-{{COMMAND_1}}
-{{COMMAND_2}}
-{{COMMAND_3}}
+(command 1)
+(command 2)
+(command 3)
 ```
 
 ## Success metrics
-<!-- What to measure. Worker reports these in the results table. -->
 | Metric | Baseline | Target | How to measure |
 |--------|----------|--------|----------------|
-| {{METRIC_1}} | {{BASELINE_1}} | {{TARGET_1}} | {{HOW_1}} |
+| (metric) | (current) | (expected) | (method) |
 
 ## Stop conditions
-<!-- Worker must halt and report BLOCKER if any of these trigger. -->
-- BLOCKER if: {{BLOCKER_CONDITION_1}}
-- BLOCKER if: {{BLOCKER_CONDITION_2}}
-- TIMEOUT after: {{TIME_BUDGET}}
+- BLOCKER if: (condition)
+- BLOCKER if: (condition)
+- TIMEOUT after: (time budget)
 
 ## Context
-<!-- Relevant beliefs and prior runs. Supervisor fills this from STATE.md. -->
-{{CONTEXT}}
+<!-- Relevant beliefs and prior runs. Supervisor fills from STATE.md. -->
+(context)
 
 ## Meta
-- **run_id**: {{RUN_ID}}
-- **created**: {{DATE}}
-- **time_budget**: {{TIME_BUDGET}}
+- **run_id**: (R###)
+- **created**: (date)
+- **time_budget**: (minutes)
 - **status**: planned
