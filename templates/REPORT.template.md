@@ -17,6 +17,11 @@
 ## Confounds
 - (what else could explain the result?)
 
+## New hypotheses
+<!-- Did this run reveal something that suggests a NEW belief to track? -->
+<!-- A resolved belief often opens new questions. -->
+- (new hypothesis, if any, with reasoning)
+
 ## Next tests
 <!-- Top 3 suggested deltas. Say what each would discriminate. -->
 1. (delta + why it would discriminate)

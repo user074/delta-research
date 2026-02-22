@@ -99,10 +99,11 @@ Pick the top-ranked non-blocked Frontier entry.
 4. Pick the delta with the highest expected discrimination for the most uncertain belief.
 
 If Frontier is empty, regenerate:
-- Find beliefs with confidence 0.3–0.7
-- Design deltas that would bisect: "if result is X, belief goes up; if Y, belief goes down"
+- Find beliefs with confidence 0.3–0.7 (active, uncertain)
+- If all beliefs are resolved (supported/rejected), derive new ones: what follow-up questions do the resolved beliefs raise? Add them to BeliefState at 0.5.
+- Design deltas that would bisect uncertain beliefs: "if result is X, belief goes up; if Y, belief goes down"
 - Rank by expected discrimination
-- If no useful deltas possible → `AMBIGUITY` interrupt
+- If no useful deltas possible AND no new beliefs can be derived → `AMBIGUITY` interrupt
 
 ### Phase 3: Create run
 
@@ -242,6 +243,11 @@ Write your report to REPORTS/{RUN_ID}.md following this structure:
 ## Confounds
 - (what else could explain the result?)
 
+## New hypotheses
+<!-- Did this run reveal something that suggests a NEW belief to track? -->
+<!-- A resolved belief often opens new questions. "A outperforms B" → "why? is it factor X?" -->
+- (new hypothesis, if any, with reasoning)
+
 ## Next tests
 1. (delta that would further discriminate, and why)
 2. (alternative approach if this direction is exhausted)
@@ -279,7 +285,7 @@ Append one row:
 | R### | <delta> | <signal> | <verdict> | #N | [link](REPORTS/R###.md) |
 ```
 
-### BeliefState
+### BeliefState — update existing
 Read the report's verdict and evidence. Judge:
 - **supports + discriminating**: meaningful increase in confidence
 - **supports + partial**: small increase
@@ -294,8 +300,19 @@ Update status:
 
 Use your judgment on magnitude. The point is directional accuracy, not false precision.
 
+### BeliefState — add new beliefs
+
+**This is critical for keeping the loop alive.** After updating existing beliefs, ask:
+
+1. **Did the worker report new hypotheses?** Check the "New hypotheses" section of the report. Add any well-reasoned ones as new beliefs at confidence 0.5.
+2. **Did a resolved belief open new questions?** When a belief reaches supported/rejected, the answer often raises deeper questions. Example: belief "A outperforms B" reaches 0.85 → add new belief "A outperforms B because of factor X" at 0.5.
+3. **Did something unexpected show up?** Anomalies, confounds, or surprising observations in the report may suggest hypotheses nobody considered at init time.
+
+The belief space should grow as you learn, not just shrink. If all beliefs are resolved and no new ones are emerging, the research question may be answered — or the agent is not looking deep enough.
+
 ### Frontier
 - Remove the completed delta
+- **Add deltas targeting new beliefs** — every new belief should have at least one candidate delta
 - Review the report's "Next tests" — add any that would discriminate on uncertain beliefs
 - Re-rank: prioritize deltas targeting the most uncertain beliefs (nearest 0.5)
 - For beliefs that have accumulated multiple null results: consider whether the belief is testable, or needs reformulation
