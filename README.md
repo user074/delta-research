@@ -2,12 +2,22 @@
 
 LLM-driven research loop. Copy into any project. The agent reads one file and runs everything.
 
+## Key Design Principles
+![Research Loop](assets/research_loop.png)
+
+We design around the following principles:
+- Delta: The unit of progress is *what changed → what happened → what it means*.
+- Bisect the hypothesis space: A good delta splits uncertain beliefs in two. Even negative results are progress if they eliminate a direction.
+- High level overview: We track hypotheses that are most likely to be true or false. 
+- Compatibility with existing tools: Just use your Claude Code or Codex. We recommend use multi-agent mode for Codex.
+
 ## Quick start
 
-1. Copy `delta-research/` into your project
-2. Tell your agent: *"Read `./delta-research/README.md` and initialize the research loop"*
-3. The agent will read `templates/SUPERVISOR.md` section 2, ask you about your research goals and hypotheses, detect your environment (conda/venv), and create `STATE.md`
-4. To run: *"Run the research loop"*
+1. Initialize the agent in your project. First 'conda activate your-env' or 'source venv/bin/activate'. Then you start your code agent. If you want true yolo mode use '--dangerously-skip-permissions' flag (claude code) or '--yolo' flag (codex). If you have not initialized your agent you should use command '/init' to initialize the agent.
+2. Copy `delta-research/` into your project
+3. Tell your agent: *"Read `./delta-research/README.md` and initialize the research loop"*
+4. The agent will read `templates/SUPERVISOR.md` section 2, ask you about your research goals and hypotheses, detect your environment (conda/venv), and create `STATE.md`
+5. **To start the automated research loop**: Just tell your agent: *"Run the research loop"*
 
 The loop runs autonomously — picks deltas, spawns workers, ingests reports, compresses state, repeats. It stops only on interrupt boundaries (budget exceeded, blocker hit, no more hypotheses to test).
 
@@ -58,6 +68,13 @@ templates/
 ```
 
 Everything else (`STATE.md`, `RUNS/`, `REPORTS/`, `ARTIFACTS/`) is created by the agent at runtime.
+
+## Running
+
+> "Run the research loop"
+
+The agent reads `templates/SUPERVISOR.md` section 3 and cycles: pick the delta most likely to discriminate uncertain beliefs, spawn a worker, ingest the report, compress state, repeat.
+
 
 ## Core idea
 
