@@ -29,18 +29,34 @@
    - Budget constraints?
    - Known risks or irreversible actions?
 
-3. **Create directories.**
+3. **Verify environment.** Check that the execution environment is ready:
+   - Detect active conda/venv: run `conda info --envs` or `which python` to find the current environment
+   - If the project uses conda, confirm the correct env is active. If not, ask the human which env to use.
+   - Record the environment in STATE.md Scratch section (e.g. `conda activate myenv`)
+   - Test that key dependencies are importable (a quick `python -c "import ..."` for known project deps)
+   - If a dependency is missing, install it within the env (`pip install` inside conda is safe)
+
+4. **Create directories.**
    ```
    mkdir -p REPORTS RUNS ARTIFACTS
    ```
 
-4. **Create STATE.md.** Use `templates/STATE.template.md` as structure. Fill in:
+5. **Create STATE.md.** Use `templates/STATE.template.md` as structure. Fill in:
    - Project name, goal, date from the conversation
    - Seed beliefs from the human's hypotheses (confidence 0.5 for unvalidated)
    - Initial frontier: deltas that would discriminate between competing hypotheses
    - Policy: budget, interrupt thresholds
+   - Scratch: record the conda/venv environment name and activation command
 
-5. **Inject into project's CLAUDE.md** (create if needed). Append a pointer:
+6. **Inject into agent config file(s).** Detect which agent is running and write to the appropriate file(s). Create if needed, append if exists.
+
+   | Agent | Config file |
+   |-------|------------|
+   | Claude Code | `CLAUDE.md` |
+   | OpenAI Codex | `AGENTS.md` |
+   | Cursor | `.cursorrules` |
+
+   If unsure, write to both `CLAUDE.md` and `AGENTS.md`. Content to append:
    ```markdown
    # Research Loop
    This project uses a structured research loop.
@@ -48,7 +64,7 @@
    State lives in `STATE.md`. To continue: "run the research loop".
    ```
 
-6. **Confirm with human.** Show STATE.md. Are the seed beliefs and frontier right?
+7. **Confirm with human.** Show STATE.md. Are the seed beliefs and frontier right?
 
 ---
 
@@ -56,6 +72,11 @@
 
 > Read this when told to "run the loop" or "continue research".
 > If STATE.md exists, you're resuming. Read it, find the last run in the Ledger, continue from there.
+
+**IMPORTANT: Do NOT pause between cycles to ask the human for permission or confirmation.**
+The loop runs autonomously until an interrupt boundary triggers (Section 7).
+After completing Phase 7, go directly back to Phase 1. No "should I continue?" — just continue.
+The human has already authorized the loop by telling you to run it.
 
 ### Phase 1: Read state
 
@@ -100,10 +121,11 @@ The plan is **immutable** once handed to the worker. If it needs to change, the 
 
 ### Phase 4: Spawn worker
 
-Assemble the worker prompt (see Section 5) with the plan content and spawn:
-```
-Task(subagent_type="general-purpose", prompt=<assembled worker prompt>)
-```
+Assemble the worker prompt (see Section 5) with the plan content and spawn a worker.
+
+**Agent-specific spawning:**
+- **Claude Code**: `Task(subagent_type="general-purpose", prompt=<worker prompt>)`
+- **Codex / other agents**: Execute the worker prompt directly (the container/sandbox provides isolation). Follow the same contract — execute the plan, write the report, don't touch STATE.md.
 
 ### Phase 5: Ingest report
 
@@ -164,10 +186,19 @@ If clear → return to Phase 1.
 
 ## 5. Worker Prompt Template
 
-> Supervisor fills `{PLAN_CONTENT}` and `{RUN_ID}` before spawning.
+> Supervisor fills `{PLAN_CONTENT}`, `{RUN_ID}`, and `{ENV_SETUP}` before spawning.
+> `{ENV_SETUP}` comes from the Scratch section of STATE.md (e.g. `conda activate myenv`).
 
 ```
 You are a research Worker executing a single experiment run.
+
+## Environment
+
+Before running any commands, activate the project environment:
+{ENV_SETUP}
+
+Verify the environment is correct before proceeding (e.g. `which python`, quick import check).
+If a package is missing, install it within the env (`pip install <pkg>`).
 
 ## Your plan
 
