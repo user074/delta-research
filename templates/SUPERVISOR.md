@@ -50,11 +50,11 @@
 
 6. **Inject into agent config file(s).** Detect which agent is running and write to the appropriate file(s). Create if needed, append if exists.
 
-   | Agent | Config file |
-   |-------|------------|
-   | Claude Code | `CLAUDE.md` |
-   | OpenAI Codex | `AGENTS.md` |
-   | Cursor | `.cursorrules` |
+   | Agent | Instruction file | Multi-agent config |
+   |-------|-----------------|-------------------|
+   | Claude Code | `CLAUDE.md` | N/A (Task tool built-in) |
+   | OpenAI Codex | `AGENTS.md` | `codex.toml` or project config |
+   | Cursor | `.cursorrules` | N/A |
 
    If unsure, write to both `CLAUDE.md` and `AGENTS.md`. Content to append:
    ```markdown
@@ -62,6 +62,15 @@
    This project uses a structured research loop.
    See `delta-research/templates/SUPERVISOR.md` for the full spec.
    State lives in `STATE.md`. To continue: "run the research loop".
+   ```
+
+   For Codex, also enable multi-agent in config:
+   ```toml
+   [features]
+   multi_agent = true
+
+   [agents.worker]
+   description = "Research worker: executes a single experiment plan, writes a structured report. Never modifies STATE.md or PLAN.md."
    ```
 
 7. **Confirm with human.** Show STATE.md. Are the seed beliefs and frontier right?
@@ -111,12 +120,22 @@ If Frontier is empty, regenerate:
 mkdir -p RUNS/R###/artifacts
 ```
 
-Write `RUNS/R###/PLAN.md` using `templates/PLAN.template.md` as structure. Fill in:
-- Delta: what to change, why, what belief it targets
-- Commands: exact steps the worker executes
-- Success metrics: what to measure
+Write `RUNS/R###/PLAN.md` using `templates/PLAN.template.md` as structure.
+
+**A good plan is substantive.** Each run is expensive — maximize information extracted per run. A plan should:
+- Have **multiple analysis steps** that build on each other (not just "run a script")
+- Spell out the **exact analysis logic** the worker should follow — what to compute, how to interpret it, what to look for
+- Include **fallback strategies** if the primary data source or approach doesn't work
+- Provide **rich context** from prior runs — specific findings, numbers, anomalies to investigate, not just "see R004"
+- Target **multiple related beliefs** when a single analysis can inform several
+- Define **clear success criteria** — what result would support vs contradict, with thresholds
+
+Fill in:
+- Delta: what to change, why, what belief(s) it targets
+- Commands: detailed step-by-step analysis (multiple steps, not a single command)
+- Success metrics: what to measure, with baselines and targets
 - Stop conditions: when to halt
-- Context: relevant beliefs and prior run results from STATE.md
+- Context: relevant beliefs, prior findings with specific numbers, data file paths
 
 The plan is **immutable** once handed to the worker. If it needs to change, the worker reports BLOCKER.
 
@@ -126,7 +145,17 @@ Assemble the worker prompt (see Section 5) with the plan content and spawn a wor
 
 **Agent-specific spawning:**
 - **Claude Code**: `Task(subagent_type="general-purpose", prompt=<worker prompt>)`
-- **Codex / other agents**: Execute the worker prompt directly (the container/sandbox provides isolation). Follow the same contract — execute the plan, write the report, don't touch STATE.md.
+- **Codex**: Spawn a sub-agent with the worker prompt. Codex handles orchestration natively — it spawns the thread, waits for results, and surfaces the output. The sub-agent runs in the same sandbox with the same file access. Instruct it to read the PLAN, execute, and write the REPORT.
+- **Other agents**: Execute the worker prompt directly. Follow the same contract — execute the plan, write the report, don't touch STATE.md.
+
+**Codex multi-agent setup** (during init, add to project config or `codex.toml`):
+```toml
+[features]
+multi_agent = true
+
+[agents.worker]
+description = "Research worker: executes a single experiment plan, writes a structured report. Never modifies STATE.md or PLAN.md."
+```
 
 ### Phase 5: Ingest report
 
