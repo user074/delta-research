@@ -10,6 +10,19 @@
 
 ---
 
+## Environment
+<!-- Managed by environment agent. Supervisor reads, does not modify directly. -->
+<!-- Workers use this to set up before executing. -->
+- **conda/venv**: (activation command, e.g. `conda activate myenv`)
+- **python**: (version)
+- **key packages**: (package versions that matter for reproducibility)
+- **gpu**: (GPU setup, e.g. `CUDA_VISIBLE_DEVICES=0,1`, or "N/A")
+- **checkpoints**: (paths to model checkpoints)
+- **datasets**: (paths to datasets)
+- **working dir**: (project root path)
+
+---
+
 ## BeliefState
 <!-- Confidence is 0–1. Beliefs nearest 0.5 are highest priority to test. -->
 <!-- Status: supported (≥0.8) | rejected (≤0.2) | conflicting | active -->

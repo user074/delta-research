@@ -1,9 +1,28 @@
 # REPORT — (run ID)
 
-## Result
-| Metric | Baseline | Observed | Δ | Notes |
-|--------|----------|----------|---|-------|
-| (metric) | (baseline) | (observed) | (change) | (notes) |
+## Summary
+(2-3 sentences: what was tested, what was found, what it means for the research question)
+
+## Motivation
+(Why this experiment? What belief is being tested? What would support vs contradict?)
+
+## Method
+(What was done, step by step — enough detail that a human could reproduce)
+
+## Results
+
+### Data
+<!-- ALL key metrics inline. Do NOT just point to JSON files. -->
+| Metric | Value | Notes |
+|--------|-------|-------|
+| (metric) | (value) | (interpretation) |
+
+### Visualizations
+<!-- Generate plots for numerical results. Save to artifacts/, embed here. -->
+![description](RUNS/(run ID)/artifacts/plot_name.png)
+
+### Analysis
+(Interpret the results. Why do they look this way? What patterns? What's surprising?)
 
 ## Signal
 - **discrimination**: (discriminating | partial | null)
@@ -19,25 +38,15 @@
 
 ## New hypotheses
 <!-- Did this run reveal something that suggests a NEW belief to track? -->
-<!-- A resolved belief often opens new questions. -->
 - (new hypothesis, if any, with reasoning)
 
 ## Next tests
-<!-- Top 3 suggested deltas. Say what each would discriminate. -->
 1. (delta + why it would discriminate)
 2. (alternative direction)
 3. (wild card from unexpected observation)
 
 ## Artifacts
 - `artifacts/(file)` — (description)
-
-## Errors
-(errors or "None")
-
-## Log
-```
-(key outputs — abbreviated but preserve important details)
-```
 
 ## Meta
 - **run_id**: (R###)

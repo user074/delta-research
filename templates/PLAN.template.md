@@ -6,6 +6,14 @@
 - **target belief**: #N — (the belief(s) this should discriminate, can target multiple)
 - **type**: (experiment | analysis | exploration | refactor)
 
+## Resources
+<!-- Exact paths. Worker uses ONLY these — no assumptions, no substitutions. -->
+<!-- If a resource is missing, worker must BLOCKER. -->
+- **checkpoint**: (exact path to model checkpoint, if applicable)
+- **dataset**: (exact path to dataset)
+- **prior artifacts**: (paths to artifacts from earlier runs that this run builds on)
+- **output dir**: RUNS/(run ID)/artifacts/
+
 ## Commands
 <!-- Detailed step-by-step. Each step should explain WHAT to do and HOW to interpret results. -->
 <!-- Multiple analysis steps that build on each other. Not just "run a script". -->
@@ -23,6 +31,7 @@
 
 ### Final step: Write report
 Write report to REPORTS/(run ID).md following the report template.
+Include all data inline, generate visualizations, embed plots with ![](path).
 
 ## Success metrics
 | Metric | Baseline | Target | How to measure |
@@ -32,7 +41,7 @@ Write report to REPORTS/(run ID).md following the report template.
 
 ## Stop conditions
 - BLOCKER if: (condition)
-- BLOCKER if: (condition)
+- BLOCKER if: resource not found at specified path
 - TIMEOUT after: (time budget)
 
 ## Context
@@ -44,9 +53,6 @@ Write report to REPORTS/(run ID).md following the report template.
 
 **Prior findings:**
 - R###: (specific finding with numbers, not just "see report")
-
-**Data files:**
-- (path to relevant artifacts from prior runs)
 
 ## Meta
 - **run_id**: (R###)

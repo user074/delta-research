@@ -26,12 +26,11 @@ Works with Claude Code, OpenAI Codex, Cursor, or any agent that reads markdown a
 ## Initialization
 
 When told to initialize, the agent will:
-1. Read your project to understand context
-2. Ask about your research question, hypotheses, and constraints
-3. Detect your conda/venv environment and verify dependencies
-4. Create `STATE.md` with seed beliefs and an initial experiment frontier
-5. Create directories (`REPORTS/`, `RUNS/`, `ARTIFACTS/`)
-6. Inject a research loop pointer into your project's `CLAUDE.md`
+1. **Interview you** — ask about your research question, hypotheses, what you've tried, what would change your mind
+2. **Set up environment** — spawn an environment agent to detect conda/venv, GPUs, verify dependencies, locate checkpoints and datasets
+3. **Create `STATE.md`** — seed beliefs from your hypotheses, initial experiment frontier, environment config
+4. **Create directories** — `REPORTS/`, `RUNS/`, `ARTIFACTS/`
+5. **Inject config** — research loop pointer into `CLAUDE.md` / `AGENTS.md`
 
 The full procedure is in `templates/SUPERVISOR.md` section 2.
 
@@ -81,3 +80,25 @@ The agent reads `templates/SUPERVISOR.md` section 3 and cycles: pick the delta m
 The loop treats research as a bandit problem over hypothesis space. Each run targets the most uncertain belief with a delta designed to discriminate — push the belief clearly toward supported or rejected. The agent uses accumulated history to get better at picking informative experiments.
 
 Negative results that clearly reject a hypothesis are as valuable as positive ones. The goal is to bisect the belief space efficiently.
+
+## Testing
+
+`tests/` has sample fixtures and automated validation. See `tests/README.md` for details.
+
+```bash
+# Generate outputs by spawning the agent, then validate
+python tests/run_tests.py --run
+
+# Or run a single test
+python tests/run_tests.py --run --test plan
+python tests/run_tests.py --run --test worker
+python tests/run_tests.py --run --test compression
+
+# Validate existing outputs (after generating manually)
+python tests/run_tests.py
+
+# Use codex instead of claude
+python tests/run_tests.py --run --agent codex
+```
+
+The validator checks structural properties: required sections, inline data, visualizations, belief confidence changes, frontier updates, new belief generation. After editing `SUPERVISOR.md`, re-run the tests and compare outputs.

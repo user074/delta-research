@@ -19,61 +19,92 @@
 ## 2. Initialization
 
 > Run this when STATE.md does not exist.
+> The human is present. Use them — they know the project better than any README.
 
-1. **Understand the project.** Read the codebase, README, docs. Understand what exists.
+### Step 1: Interview the human
 
-2. **Talk to the human.** Ask:
-   - What's the research question?
-   - Any existing hypotheses?
-   - What does success look like?
-   - Budget constraints?
-   - Known risks or irreversible actions?
+Don't try to silently understand the project from code alone. The human is here and has context you can't get from files. Run an interactive interview:
 
-3. **Verify environment.** Check that the execution environment is ready:
-   - Detect active conda/venv: run `conda info --envs` or `which python` to find the current environment
-   - If the project uses conda, confirm the correct env is active. If not, ask the human which env to use.
-   - Record the environment in STATE.md Scratch section (e.g. `conda activate myenv`)
-   - Test that key dependencies are importable (a quick `python -c "import ..."` for known project deps)
-   - If a dependency is missing, install it within the env (`pip install` inside conda is safe)
+**Round 1 — Project context** (ask these, wait for answers):
+- What is this project? What does it do?
+- What's your research question? What are you trying to figure out?
+- What have you tried so far? What worked, what didn't?
 
-4. **Create directories.**
-   ```
-   mkdir -p REPORTS RUNS ARTIFACTS
-   ```
+**Round 2 — Hypotheses** (dig deeper based on round 1):
+- What do you think is true but haven't proven? (these become seed beliefs)
+- What are the competing explanations? (these shape the frontier)
+- What would change your mind? (this defines what "discriminating" means)
 
-5. **Create STATE.md.** Use `templates/STATE.template.md` as structure. Fill in:
-   - Project name, goal, date from the conversation
-   - Seed beliefs from the human's hypotheses (confidence 0.5 for unvalidated)
-   - Initial frontier: deltas that would discriminate between competing hypotheses
-   - Policy: budget, interrupt thresholds
-   - Scratch: record the conda/venv environment name and activation command
+**Round 3 — Practical setup**:
+- What does success look like? When would you stop?
+- Any constraints — time budget, compute limits, things not to touch?
+- Any irreversible actions to watch for?
 
-6. **Inject into agent config file(s).** Detect which agent is running and write to the appropriate file(s). Create if needed, append if exists.
+Adapt the interview based on what the human says. If they mention something interesting, follow up. The goal is to extract their mental model of the problem — not just fill in template fields.
 
-   | Agent | Instruction file | Multi-agent config |
-   |-------|-----------------|-------------------|
-   | Claude Code | `CLAUDE.md` | N/A (Task tool built-in) |
-   | OpenAI Codex | `AGENTS.md` | `codex.toml` or project config |
-   | Cursor | `.cursorrules` | N/A |
+### Step 2: Environment setup
 
-   If unsure, write to both `CLAUDE.md` and `AGENTS.md`. Content to append:
-   ```markdown
-   # Research Loop
-   This project uses a structured research loop.
-   See `delta-research/templates/SUPERVISOR.md` for the full spec.
-   State lives in `STATE.md`. To continue: "run the research loop".
-   ```
+Spawn an environment agent to handle setup. This is separate from the research loop — the supervisor does not manage conda, GPUs, or dependencies directly.
 
-   For Codex, also enable multi-agent in config:
-   ```toml
-   [features]
-   multi_agent = true
+The environment agent should:
+- Detect active conda/venv, confirm with human
+- Check GPU availability if relevant (`nvidia-smi`)
+- Verify key dependencies are importable
+- Install missing packages within the env
+- Locate model checkpoints, datasets, and other resources
+- Record everything in STATE.md Environment section
 
-   [agents.worker]
-   description = "Research worker: executes a single experiment plan, writes a structured report. Never modifies STATE.md or PLAN.md."
-   ```
+**Agent-specific spawning:**
+- **Claude Code**: `Task(subagent_type="general-purpose", prompt="Set up and verify the research environment. <details from interview>. Record in STATE.md Environment section.")`
+- **Codex**: Spawn a sub-agent for environment setup.
 
-7. **Confirm with human.** Show STATE.md. Are the seed beliefs and frontier right?
+The environment can be re-invoked later (new model, GPU change) without touching research state.
+
+### Step 3: Create project structure
+
+```
+mkdir -p REPORTS RUNS ARTIFACTS
+```
+
+### Step 4: Create STATE.md
+
+Use `templates/STATE.template.md` as structure. Fill in from the interview:
+- Project name, goal, date
+- Seed beliefs from the human's hypotheses (confidence 0.5)
+- Initial frontier: deltas that would discriminate between competing hypotheses
+- Policy: budget, interrupt thresholds
+- Environment section populated by environment agent
+
+### Step 5: Inject into agent config file(s)
+
+Detect which agent is running and write to the appropriate file(s). Create if needed, append if exists.
+
+| Agent | Instruction file | Multi-agent config |
+|-------|-----------------|-------------------|
+| Claude Code | `CLAUDE.md` | N/A (Task tool built-in) |
+| OpenAI Codex | `AGENTS.md` | `codex.toml` or project config |
+| Cursor | `.cursorrules` | N/A |
+
+If unsure, write to both `CLAUDE.md` and `AGENTS.md`. Content to append:
+```markdown
+# Research Loop
+This project uses a structured research loop.
+See `delta-research/templates/SUPERVISOR.md` for the full spec.
+State lives in `STATE.md`. To continue: "run the research loop".
+```
+
+For Codex, also enable multi-agent in config:
+```toml
+[features]
+multi_agent = true
+
+[agents.worker]
+description = "Research worker: executes a single experiment plan, writes a structured report. Never modifies STATE.md or PLAN.md."
+```
+
+### Step 6: Confirm with human
+
+Show STATE.md. Are the seed beliefs right? Is the frontier targeting the right questions? Anything missing from the environment setup?
 
 ---
 
@@ -94,6 +125,7 @@ Read `STATE.md`. Parse:
 - **Ledger**: history of completed runs
 - **Frontier**: ranked candidate deltas
 - **Policy**: interrupt boundaries
+- **Environment**: conda, paths, resources (pass to worker)
 
 Next run ID = highest Ledger run + 1 (or R001 if empty).
 
@@ -129,10 +161,12 @@ Write `RUNS/R###/PLAN.md` using `templates/PLAN.template.md` as structure.
 - Provide **rich context** from prior runs — specific findings, numbers, anomalies to investigate, not just "see R004"
 - Target **multiple related beliefs** when a single analysis can inform several
 - Define **clear success criteria** — what result would support vs contradict, with thresholds
+- Specify **exact resources** — checkpoint paths, dataset locations, which artifacts from prior runs to use. No ambiguity.
 
 Fill in:
 - Delta: what to change, why, what belief(s) it targets
 - Commands: detailed step-by-step analysis (multiple steps, not a single command)
+- Resources: exact paths to checkpoints, data, prior artifacts (from STATE.md Environment + prior runs)
 - Success metrics: what to measure, with baselines and targets
 - Stop conditions: when to halt
 - Context: relevant beliefs, prior findings with specific numbers, data file paths
@@ -160,11 +194,13 @@ description = "Research worker: executes a single experiment plan, writes a stru
 ### Phase 5: Ingest report
 
 Read `REPORTS/R###.md`. Extract:
-- Results (what was measured)
+- Summary (what was done, what was found)
+- Results with inline data
 - Signal: discriminating / partial / null
 - Verdict: supports / contradicts / unclear / BLOCKER
 - Which belief was affected
 - Confounds
+- New hypotheses
 - Suggested next deltas
 
 ### Phase 6: Compress state
@@ -172,6 +208,7 @@ Read `REPORTS/R###.md`. Extract:
 Update STATE.md (see Section 6 for rules):
 - Append to Ledger
 - Update BeliefState confidence and status based on the evidence
+- Add new beliefs from report
 - Update Frontier: remove completed delta, consider adding suggested next deltas
 - Update Meta (run count, date)
 
@@ -188,28 +225,34 @@ If clear → return to Phase 1.
 ### STATE.md
 - **Owner**: Supervisor
 - **Worker**: read-only
+- **Environment section**: managed by environment agent, read by workers
 - Updated after every run
 
 ### PLAN.md (per run)
 - **Owner**: Supervisor creates, Worker reads
 - **Immutable** during execution
-- If the plan can't be followed, Worker reports BLOCKER
+- Must specify exact resource paths (checkpoints, datasets, artifacts) — worker uses what's listed
+- If the plan can't be followed or a resource is missing, Worker reports BLOCKER
 
 ### REPORT.md (per run)
 - **Owner**: Worker creates, Supervisor reads
 - Must follow `templates/REPORT.template.md` structure
-- Should be detailed — there may be signals in the details that compression misses
+- **Must be human-readable** — a researcher should understand what happened by reading just the report
+- All data inline — numbers, tables, key outputs in the report itself, not just pointers to JSON files
+- Visualizations embedded with `![description](path)` — generate plots for any numerical results
 
 ### Supervisor NEVER
 - Parses raw logs or debugs mid-run
 - Modifies a plan after handing it to a worker
 - Skips state compression
 - Runs experiments directly (always spawn a worker)
+- Manages environment directly (spawn environment agent)
 
 ### Worker NEVER
 - Modifies STATE.md
 - Modifies PLAN.md
-- Chooses new research directions (suggests only via "Next tests" in report)
+- Chooses new research directions (suggests only via "New hypotheses" and "Next tests" in report)
+- Uses resources not specified in the plan (wrong checkpoint, different dataset)
 - Ignores stop conditions
 
 ---
@@ -217,7 +260,7 @@ If clear → return to Phase 1.
 ## 5. Worker Prompt Template
 
 > Supervisor fills `{PLAN_CONTENT}`, `{RUN_ID}`, and `{ENV_SETUP}` before spawning.
-> `{ENV_SETUP}` comes from the Scratch section of STATE.md (e.g. `conda activate myenv`).
+> `{ENV_SETUP}` comes from the Environment section of STATE.md.
 
 ```
 You are a research Worker executing a single experiment run.
@@ -238,10 +281,10 @@ If a package is missing, install it within the env (`pip install <pkg>`).
 
 - NEVER modify STATE.md
 - NEVER modify PLAN.md
-- NEVER choose new research directions (suggest via "Next tests" only)
+- NEVER choose new research directions (suggest via "New hypotheses" and "Next tests" only)
+- ONLY use resources specified in the plan (checkpoints, datasets, artifacts). If a resource is missing or wrong, BLOCKER.
 - If any stop condition triggers, immediately report verdict = BLOCKER
 - Null results are valuable — report honestly
-- Be detailed in your report — include observations that might not seem important
 
 ## Execution
 
@@ -252,14 +295,43 @@ If a package is missing, install it within the env (`pip install <pkg>`).
 
 ## Report
 
-Write your report to REPORTS/{RUN_ID}.md following this structure:
+Write your report to REPORTS/{RUN_ID}.md. The report must be HUMAN-READABLE — a researcher should understand what happened by reading it alone.
+
+### Report rules:
+- Start with a plain-language summary (what you did, what you found, what it means)
+- Put ALL data inline — numbers, tables, key values directly in the report. Do NOT just point to JSON files.
+- Generate visualizations for any numerical results. Save plots to `RUNS/{RUN_ID}/artifacts/` and embed in the report with `![description](RUNS/{RUN_ID}/artifacts/filename.png)`
+- Include your analysis — why do the results look this way? What's the interpretation?
+- The structured sections (Signal, Verdict, etc.) come AFTER the human-readable content
+
+### Report structure:
 
 # REPORT — {RUN_ID}
 
-## Result
-| Metric | Baseline | Observed | Δ | Notes |
-|--------|----------|----------|---|-------|
-(fill from measurements)
+## Summary
+(2-3 sentences: what was tested, what was found, what it means for the research question)
+
+## Motivation
+(Why this experiment? What belief is being tested? What would support vs contradict?)
+
+## Method
+(What was done, step by step — enough that a human could reproduce)
+
+## Results
+
+### Data
+(Inline tables with actual numbers. ALL key metrics here, not in separate files.)
+
+| Metric | Value | Notes |
+|--------|-------|-------|
+(every important measurement)
+
+### Visualizations
+(Generate plots. Embed them.)
+![description](RUNS/{RUN_ID}/artifacts/plot_name.png)
+
+### Analysis
+(Interpret the results. Why do they look this way? What patterns do you see? What's surprising?)
 
 ## Signal
 - **discrimination**: (discriminating | partial | null)
@@ -274,7 +346,6 @@ Write your report to REPORTS/{RUN_ID}.md following this structure:
 
 ## New hypotheses
 <!-- Did this run reveal something that suggests a NEW belief to track? -->
-<!-- A resolved belief often opens new questions. "A outperforms B" → "why? is it factor X?" -->
 - (new hypothesis, if any, with reasoning)
 
 ## Next tests
@@ -284,14 +355,6 @@ Write your report to REPORTS/{RUN_ID}.md following this structure:
 
 ## Artifacts
 - `artifacts/<file>` — <what it contains>
-
-## Errors
-(any errors, or "None")
-
-## Log
-```
-(key outputs, abbreviated but preserving important details)
-```
 
 ## Meta
 - **run_id**: {RUN_ID}
