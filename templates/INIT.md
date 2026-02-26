@@ -16,19 +16,23 @@ Before talking to the human, scan the repo like a standard /init:
 
 ### 1b: Interview the human
 
-Don't rely on code alone. The human has context you can't get from files. Run an interactive interview:
+The code reading gives you a head start. Use it. Don't ask the human things you can already see in the code — instead, lead with your understanding and let them correct or extend it.
 
-**Round 1 — Project context** (ask these, wait for answers):
-- What is this project? What does it do?
-- What's your research question? What are you trying to figure out?
-- What have you tried so far? What worked, what didn't?
+**Do NOT dump all questions at once.** This is a conversation, not a form. One round at a time. Wait for the human's response before moving to the next round.
+
+**Round 1 — Project context**:
+Lead with what you learned from the code and present it to the human. For example: *"From reading the repo, this looks like [X] that does [Y]. The main entry point is [Z]. Is that right? What's the research question you're trying to answer?"*
+
+Let the human confirm, correct, or add what's missing. Ask about what they've tried and what worked/didn't. Talk to human until you have a good understanding of the project and their research goals.
 
 **Round 2 — Hypotheses** (dig deeper based on round 1):
+Ask the human to list their hypotheses one by one. Do not dump all questions at once.
 - What do you think is true but haven't proven? (these become seed beliefs)
 - What are the competing explanations? (these shape the frontier)
 - What would change your mind? (this defines what "discriminating" means)
 
 **Round 3 — Practical setup**:
+Ask the human to list their constraints one by one. Do not dump all questions at once.
 - What does success look like? When would you stop?
 - Any constraints — time budget, compute limits, things not to touch?
 - Any irreversible actions to watch for?
@@ -47,16 +51,25 @@ Detect which agent is running. Write or update the appropriate instruction file(
 
 If unsure, write both `CLAUDE.md` and `AGENTS.md`.
 
+If CLAUDE.md or AGENTS.md already exists, read it first. Incorporate any useful existing content into the updated file — don't discard what's already there.
+
+If there is a README.md, read it and include the important parts (project purpose, setup, key commands) — don't make the agent re-discover what's already documented.
+
 The file should contain:
 
-- **Project overview** — what the project does, structure, key files (from 1a)
+- **Project overview** — the goal is to give future agent sessions enough context to be productive immediately, without re-reading the whole codebase:
+  - What the project does (one paragraph)
+  - High-level architecture: how the major components fit together, data flow, key abstractions. Focus on the "big picture" that requires reading multiple files to understand — things an agent can't figure out from a single file
+  - Key files and entry points (only the important ones, not an exhaustive listing — agents can discover the rest with tools)
+  - Common commands: how to run the project, run tests, build, etc. For research projects this might be how to run experiments, launch training, evaluate models
+  - Important gotchas, non-obvious conventions, or anything that would trip up a new contributor
+  - Avoid: listing every file/directory (easily discovered), generic development practices, information that duplicates README.md verbatim
 - **Research loop** section:
   - Research question and goals (from interview)
-  - What's been tried, key constraints
+  - Key constraints (from interview)
   - Pointer: `See delta-research/templates/SUPERVISOR.md for the loop spec`
-  - Pointer: `State lives in STATE.md`
+  - Pointer: `Current state (beliefs, what's been tried, frontier) lives in STATE.md`
   - How to run: `To continue research, say: "run the research loop"`
-- If the file already exists, preserve existing non-research content and add/update the research sections
 
 For Codex, also enable multi-agent in config:
 ```toml
