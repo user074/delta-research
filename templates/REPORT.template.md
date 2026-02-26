@@ -18,8 +18,8 @@
 | (metric) | (value) | (interpretation) |
 
 ### Visualizations
-<!-- Generate plots for numerical results. Save to artifacts/, embed here. -->
-![description](RUNS/(run ID)/artifacts/plot_name.png)
+<!-- Generate plots for numerical results. Save to artifacts/, embed here. Ensure the path is relative to the report file.-->
+![description](../RUNS/(run ID)/artifacts/plot_name.png)
 
 ### Analysis
 (Interpret the results. Why do they look this way? What patterns? What's surprising?)

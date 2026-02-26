@@ -93,6 +93,8 @@ The environment agent should:
 - Install missing packages within the env
 - Locate model checkpoints, datasets, and other resources
 - Record everything in STATE.md Environment section
+- Check user how many GPUs to use during training
+- Check whether to use wandb for logging during training and how to configure it (start a new project, existing project, etc.)
 
 **Agent-specific spawning:**
 - **Claude Code**: `Task(subagent_type="general-purpose", prompt="Set up and verify the research environment. <details from interview>. Record in STATE.md Environment section.")`
