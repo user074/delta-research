@@ -3,6 +3,8 @@
 > This file is the complete specification for running the research loop.
 > An LLM agent reads this file and acts as both supervisor and worker spawner.
 > There are no scripts. The agent IS the orchestrator.
+>
+> For initialization (first-time setup), see `templates/INIT.md`.
 
 ---
 
@@ -16,105 +18,13 @@
 
 ---
 
-## 2. Initialization
-
-> Run this when STATE.md does not exist.
-> The human is present. Use them — they know the project better than any README.
-
-### Step 1: Interview the human
-
-Don't try to silently understand the project from code alone. The human is here and has context you can't get from files. Run an interactive interview:
-
-**Round 1 — Project context** (ask these, wait for answers):
-- What is this project? What does it do?
-- What's your research question? What are you trying to figure out?
-- What have you tried so far? What worked, what didn't?
-
-**Round 2 — Hypotheses** (dig deeper based on round 1):
-- What do you think is true but haven't proven? (these become seed beliefs)
-- What are the competing explanations? (these shape the frontier)
-- What would change your mind? (this defines what "discriminating" means)
-
-**Round 3 — Practical setup**:
-- What does success look like? When would you stop?
-- Any constraints — time budget, compute limits, things not to touch?
-- Any irreversible actions to watch for?
-
-Adapt the interview based on what the human says. If they mention something interesting, follow up. The goal is to extract their mental model of the problem — not just fill in template fields.
-
-### Step 2: Environment setup
-
-Spawn an environment agent to handle setup. This is separate from the research loop — the supervisor does not manage conda, GPUs, or dependencies directly.
-
-The environment agent should:
-- Detect active conda/venv, confirm with human
-- Check GPU availability if relevant (`nvidia-smi`)
-- Verify key dependencies are importable
-- Install missing packages within the env
-- Locate model checkpoints, datasets, and other resources
-- Record everything in STATE.md Environment section
-
-**Agent-specific spawning:**
-- **Claude Code**: `Task(subagent_type="general-purpose", prompt="Set up and verify the research environment. <details from interview>. Record in STATE.md Environment section.")`
-- **Codex**: Spawn a sub-agent for environment setup.
-
-The environment can be re-invoked later (new model, GPU change) without touching research state.
-
-### Step 3: Create project structure
-
-```
-mkdir -p REPORTS RUNS ARTIFACTS
-```
-
-### Step 4: Create STATE.md
-
-Use `templates/STATE.template.md` as structure. Fill in from the interview:
-- Project name, goal, date
-- Seed beliefs from the human's hypotheses (confidence 0.5)
-- Initial frontier: deltas that would discriminate between competing hypotheses
-- Policy: budget, interrupt thresholds
-- Environment section populated by environment agent
-
-### Step 5: Inject into agent config file(s)
-
-Detect which agent is running and write to the appropriate file(s). Create if needed, append if exists.
-
-| Agent | Instruction file | Multi-agent config |
-|-------|-----------------|-------------------|
-| Claude Code | `CLAUDE.md` | N/A (Task tool built-in) |
-| OpenAI Codex | `AGENTS.md` | `codex.toml` or project config |
-| Cursor | `.cursorrules` | N/A |
-
-If unsure, write to both `CLAUDE.md` and `AGENTS.md`. Content to append:
-```markdown
-# Research Loop
-This project uses a structured research loop.
-See `delta-research/templates/SUPERVISOR.md` for the full spec.
-State lives in `STATE.md`. To continue: "run the research loop".
-```
-
-For Codex, also enable multi-agent in config:
-```toml
-[features]
-multi_agent = true
-
-[agents.worker]
-description = "Research worker: executes a single experiment plan, writes a structured report. Never modifies STATE.md or PLAN.md."
-```
-
-### Step 6: Confirm with human
-
-Show STATE.md. Are the seed beliefs right? Is the frontier targeting the right questions? Anything missing from the environment setup?
-
----
-
-## 3. Supervisor Loop
+## 2. Supervisor Loop
 
 > Read this when told to "run the loop" or "continue research".
 > If STATE.md exists, you're resuming. Read it, find the last run in the Ledger, continue from there.
 
 **IMPORTANT: Do NOT pause between cycles to ask the human for permission or confirmation.**
-The loop runs autonomously until an interrupt boundary triggers (Section 7).
+The loop runs autonomously until an interrupt boundary triggers (Section 6).
 After completing Phase 7, go directly back to Phase 1. No "should I continue?" — just continue.
 The human has already authorized the loop by telling you to run it.
 
@@ -175,7 +85,7 @@ The plan is **immutable** once handed to the worker. If it needs to change, the 
 
 ### Phase 4: Spawn worker
 
-Assemble the worker prompt (see Section 5) with the plan content and spawn a worker.
+Assemble the worker prompt (see Section 4) with the plan content and spawn a worker.
 
 **Agent-specific spawning:**
 - **Claude Code**: `Task(subagent_type="general-purpose", prompt=<worker prompt>)`
@@ -205,7 +115,7 @@ Read `REPORTS/R###.md`. Extract:
 
 ### Phase 6: Compress state
 
-Update STATE.md (see Section 6 for rules):
+Update STATE.md (see Section 5 for rules):
 - Append to Ledger
 - Update BeliefState confidence and status based on the evidence
 - Add new beliefs from report
@@ -214,13 +124,13 @@ Update STATE.md (see Section 6 for rules):
 
 ### Phase 7: Check interrupts
 
-Evaluate all interrupt boundaries (Section 7). If any trigger → stop and report to human.
+Evaluate all interrupt boundaries (Section 6). If any trigger → stop and report to human.
 
 If clear → return to Phase 1.
 
 ---
 
-## 4. Contracts
+## 3. Contracts
 
 ### STATE.md
 - **Owner**: Supervisor
@@ -257,7 +167,7 @@ If clear → return to Phase 1.
 
 ---
 
-## 5. Worker Prompt Template
+## 4. Worker Prompt Template
 
 > Supervisor fills `{PLAN_CONTENT}`, `{RUN_ID}`, and `{ENV_SETUP}` before spawning.
 > `{ENV_SETUP}` comes from the Environment section of STATE.md.
@@ -366,7 +276,7 @@ Write your report to REPORTS/{RUN_ID}.md. The report must be HUMAN-READABLE — 
 
 ---
 
-## 6. State Compression Rules
+## 5. State Compression Rules
 
 > After ingesting a report, update STATE.md as follows.
 > Compression is lossy by design — but the full report is always available for re-reading.
@@ -415,7 +325,7 @@ The belief space should grow as you learn, not just shrink. If all beliefs are r
 
 ---
 
-## 7. Interrupt Boundaries
+## 6. Interrupt Boundaries
 
 | Boundary | Condition | Action |
 |----------|-----------|--------|

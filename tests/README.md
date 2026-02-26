@@ -7,7 +7,7 @@ Modular tests for each stage of the loop. Each test has sample inputs and instru
 **Input**: `plan_generation/STATE.md` — a state with 3 beliefs, 2 prior runs, 2 frontier candidates.
 
 **Run**: Tell the agent:
-> "You are a research supervisor. Read `tests/plan_generation/STATE.md` and `delta-research/templates/SUPERVISOR.md` section 3. Generate a plan for the next run. Write it to `tests/plan_generation/output_PLAN.md`."
+> "You are a research supervisor. Read `tests/plan_generation/STATE.md` and `delta-research/templates/SUPERVISOR.md` section 2. Generate a plan for the next run. Write it to `tests/plan_generation/output_PLAN.md`."
 
 **Check**:
 - Does the plan have multiple analysis steps (not just "run a script")?
@@ -21,7 +21,7 @@ Modular tests for each stage of the loop. Each test has sample inputs and instru
 **Input**: `worker_execution/PLAN.md` — a concrete plan with steps that run pure Python (no special deps).
 
 **Run**: Tell the agent:
-> "You are a research worker. Read `tests/worker_execution/PLAN.md` and follow the contract in `delta-research/templates/SUPERVISOR.md` section 5. Execute the plan and write your report to `tests/worker_execution/output_REPORT.md`."
+> "You are a research worker. Read `tests/worker_execution/PLAN.md` and follow the contract in `delta-research/templates/SUPERVISOR.md` section 4. Execute the plan and write your report to `tests/worker_execution/output_REPORT.md`."
 
 **Check**:
 - Does the report start with a human-readable Summary + Motivation?
@@ -35,7 +35,7 @@ Modular tests for each stage of the loop. Each test has sample inputs and instru
 **Input**: `state_compression/STATE_before.md` + `state_compression/REPORT.md`
 
 **Run**: Tell the agent:
-> "You are a research supervisor. Read `delta-research/templates/SUPERVISOR.md` section 6. Given the state in `tests/state_compression/STATE_before.md` and the report in `tests/state_compression/REPORT.md`, produce the updated state. Write it to `tests/state_compression/output_STATE_after.md`."
+> "You are a research supervisor. Read `delta-research/templates/SUPERVISOR.md` section 5. Given the state in `tests/state_compression/STATE_before.md` and the report in `tests/state_compression/REPORT.md`, produce the updated state. Write it to `tests/state_compression/output_STATE_after.md`."
 
 **Check**:
 - Was a new row appended to the Ledger?

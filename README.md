@@ -8,16 +8,17 @@ LLM-driven research loop. Copy into any project. The agent reads one file and ru
 We design around the following principles:
 - Delta: The unit of progress is *what changed → what happened → what it means*.
 - Bisect the hypothesis space: A good delta splits uncertain beliefs in two. Even negative results are progress if they eliminate a direction.
-- High level overview: We track hypotheses that are most likely to be true or false. 
+- High level overview: We track hypotheses that are most likely to be true or false.
 - Compatibility with existing tools: Just use your Claude Code or Codex. We recommend use multi-agent mode for Codex.
 
 ## Quick start
 
-1. Initialize the agent in your project. First 'conda activate your-env' or 'source venv/bin/activate'. Then you start your code agent. If you want true yolo mode use '--dangerously-skip-permissions' flag (claude code) or '--yolo' flag (codex). If you have not initialized your agent you should use command '/init' to initialize the agent.
-2. Copy `delta-research/` into your project
-3. Tell your agent: *"Read `./delta-research/README.md` and initialize the research loop"*
-4. The agent will read `templates/SUPERVISOR.md` section 2, ask you about your research goals and hypotheses, detect your environment (conda/venv), and create `STATE.md`
-5. **To start the automated research loop**: Just tell your agent: *"Run the research loop"*
+1. Copy `delta-research/` into your project
+2. Activate your environment: `conda activate your-env` or `source venv/bin/activate`
+3. Start your code agent. For full autonomy use `--dangerously-skip-permissions` (Claude Code) or `--full-auto` (Codex).
+4. Tell your agent: *"Read `./delta-research/README.md` and initialize the research loop"*
+5. The agent reads `templates/INIT.md`, interviews you, sets up permissions, detects your environment, and creates `STATE.md`
+6. **To start the automated research loop**: Tell your agent: *"Run the research loop"*
 
 The loop runs autonomously — picks deltas, spawns workers, ingests reports, compresses state, repeats. It stops only on interrupt boundaries (budget exceeded, blocker hit, no more hypotheses to test).
 
@@ -25,42 +26,21 @@ Works with Claude Code, OpenAI Codex, Cursor, or any agent that reads markdown a
 
 ## Initialization
 
-When told to initialize, the agent will:
-1. **Interview you** — ask about your research question, hypotheses, what you've tried, what would change your mind
+When told to initialize, the agent reads `templates/INIT.md` and will:
+1. **Understand the project and write agent instructions** — read the codebase, interview you about research goals/hypotheses/constraints, then write CLAUDE.md/AGENTS.md with project context and research loop pointers
 2. **Set up environment** — spawn an environment agent to detect conda/venv, GPUs, verify dependencies, locate checkpoints and datasets
-3. **Create `STATE.md`** — seed beliefs from your hypotheses, initial experiment frontier, environment config
+3. **Set up permissions** — configure auto-approval for shell commands so the loop runs without interruption (asks you which level you want)
 4. **Create directories** — `REPORTS/`, `RUNS/`, `ARTIFACTS/`
-5. **Inject config** — research loop pointer into `CLAUDE.md` / `AGENTS.md`
+5. **Create `STATE.md`** — seed beliefs from your hypotheses, initial experiment frontier, environment config
 
-The full procedure is in `templates/SUPERVISOR.md` section 2.
-
-## Permissions for autonomous operation
-
-The loop runs shell commands (python scripts, data processing, etc.). To avoid approval prompts interrupting autonomous runs:
-
-**Claude Code** — configure `.claude/settings.local.json`:
-```json
-{
-  "permissions": {
-    "allow": [
-      "Bash(python:*)",
-      "Bash(python3:*)",
-      "Bash(pip install:*)",
-      "Bash(conda:*)",
-      "Bash(mkdir:*)"
-    ]
-  }
-}
-```
-Or `"allow": ["Bash(*)"]` for full autonomy (conda env is the safety boundary).
-
-**Codex** — runs in a sandboxed container by default, so permissions are less of a concern. Ensure the container image has the right conda env and dependencies pre-installed, or let the agent install during init.
+The full procedure is in `templates/INIT.md`.
 
 ## What's in the box
 
 ```
 templates/
-  SUPERVISOR.md          # The spec — loop logic, contracts, worker template
+  INIT.md                # First-time setup — interview, environment, permissions
+  SUPERVISOR.md          # The loop — delta selection, worker spawning, state compression
   STATE.template.md      # Structure for STATE.md
   PLAN.template.md       # Structure for per-run plans
   REPORT.template.md     # Structure for per-run reports
@@ -72,8 +52,7 @@ Everything else (`STATE.md`, `RUNS/`, `REPORTS/`, `ARTIFACTS/`) is created by th
 
 > "Run the research loop"
 
-The agent reads `templates/SUPERVISOR.md` section 3 and cycles: pick the delta most likely to discriminate uncertain beliefs, spawn a worker, ingest the report, compress state, repeat.
-
+The agent reads `templates/SUPERVISOR.md` and cycles: pick the delta most likely to discriminate uncertain beliefs, spawn a worker, ingest the report, compress state, repeat.
 
 ## Core idea
 

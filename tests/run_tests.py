@@ -415,7 +415,7 @@ def validate_state_compression(
 PROMPTS = {
     "plan_generation": (
         "You are a research supervisor. "
-        "Read {supervisor} section 3 (Supervisor Loop). "
+        "Read {supervisor} section 2 (Supervisor Loop). "
         "Read the current state from {input}. "
         "Generate a plan for the next run. "
         "Write it to {output}. "
@@ -423,7 +423,7 @@ PROMPTS = {
     ),
     "worker_execution": (
         "You are a research worker. "
-        "Read the contract in {supervisor} section 5 (Worker Prompt Template). "
+        "Read the contract in {supervisor} section 4 (Worker Prompt Template). "
         "Your plan is in {input}. "
         "Execute the plan and write your report to {output}. "
         "Save artifacts to tests/worker_execution/artifacts/. "
@@ -431,7 +431,7 @@ PROMPTS = {
     ),
     "state_compression": (
         "You are a research supervisor. "
-        "Read {supervisor} section 6 (State Compression Rules). "
+        "Read {supervisor} section 5 (State Compression Rules). "
         "The current state is in {state_before}. "
         "The report to ingest is in {report}. "
         "Produce the updated state and write it to {output}. "
