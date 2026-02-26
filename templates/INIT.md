@@ -93,7 +93,7 @@ The environment agent should:
 - Install missing packages within the env
 - Locate model checkpoints, datasets, and other resources
 - Record everything in STATE.md Environment section
-- Check user how many GPUs to use during training
+- Check user how many GPUs to use during training and maximize the utilization of the GPUs
 - Check whether to use wandb for logging during training and how to configure it (start a new project, existing project, etc.)
 
 **Agent-specific spawning:**
