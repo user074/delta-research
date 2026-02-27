@@ -88,14 +88,24 @@ Spawn an environment agent to handle setup. This is separate from the research l
 
 The environment agent should:
 - Detect active conda/venv, confirm with human
-- Check GPU availability if relevant (`nvidia-smi`)
+- Check GPU availability if relevant (`nvidia-smi`). Ask how many GPUs to use and how to maximize utilization (e.g. CUDA_VISIBLE_DEVICES, DataParallel vs DistributedDataParallel)
 - Verify key dependencies are importable
 - Install missing packages within the env
-- Locate model checkpoints, datasets, and other resources
+
+**Storage and downloads:**
+- Check whether there are existing data, model checkpoints, or trained weights directories. If so, confirm with the human whether to use them
+- If none exist, ask the human where to create them. Don't let models/datasets download to system defaults (e.g. `~/.cache/huggingface`) — confirm an explicit project-local or shared directory
+- Record all paths in STATE.md so workers use the right locations
+
+**Logging and observability:**
+- Ask whether to use wandb (or similar: tensorboard, mlflow) for experiment tracking
+- If yes: project name, entity/team, whether to create a new project or use an existing one
+- Configure run naming so logs map back to research loop runs (e.g. run name = `R001`, `R002` matching STATE.md ledger)
+- Record the logging config in STATE.md Environment section and in CLAUDE.md/AGENTS.md so future sessions use it automatically
+
+**Wrap up:**
 - Record everything in STATE.md Environment section
-- Check user how many GPUs to use during training and maximize the utilization of the GPUs
-- Check whether to use wandb for logging during training and how to configure it (start a new project, existing project, etc.)
-- Check whether there are any existing data, model, or trained checkpoints directories and how to use them. If there are, ask the user to confirm whether to use them. If there are no existing directories, ask the user how would they like to create them.
+- Update CLAUDE.md/AGENTS.md with environment-specific commands and paths (so future sessions don't need to re-discover them)
 
 **Agent-specific spawning:**
 - **Claude Code**: `Task(subagent_type="general-purpose", prompt="Set up and verify the research environment. <details from interview>. Record in STATE.md Environment section.")`
