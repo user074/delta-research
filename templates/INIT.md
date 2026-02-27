@@ -95,6 +95,7 @@ The environment agent should:
 - Record everything in STATE.md Environment section
 - Check user how many GPUs to use during training and maximize the utilization of the GPUs
 - Check whether to use wandb for logging during training and how to configure it (start a new project, existing project, etc.)
+- Check whether there are any existing data, model, or trained checkpoints directories and how to use them. If there are, ask the user to confirm whether to use them. If there are no existing directories, ask the user how would they like to create them.
 
 **Agent-specific spawning:**
 - **Claude Code**: `Task(subagent_type="general-purpose", prompt="Set up and verify the research environment. <details from interview>. Record in STATE.md Environment section.")`
