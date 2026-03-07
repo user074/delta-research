@@ -7,6 +7,7 @@
 - **last_updated**: 2026-02-23
 - **total_runs**: 3
 - **status**: active
+- **paradigm**: v1
 
 ---
 
@@ -23,14 +24,13 @@
 
 ## BeliefState
 
-| # | Belief | Status | Confidence | Key evidence | Last updated |
-|---|--------|--------|------------|--------------|--------------|
-| 1 | Timsort's advantage over quicksort grows with nearly-sorted data | active | 0.7 | R001: 3.2x faster on 90%-sorted arrays (1M elements) | 2026-02-21 |
-| 2 | Memory allocation is the dominant cost for large arrays (>1M), not comparisons | active | 0.5 | R002: inconclusive — alloc time noisy | 2026-02-22 |
-| 3 | Duplicate-heavy distributions reduce sorting time due to equal-element optimizations | supported | 0.82 | R003: discriminating support; 95% duplicates gives 1.8x (1M) to 2.1x (5M); Timsort-specific via heapq confound check | 2026-02-23 |
-| 4 | Timsort duplicate-related speedup increases with array size due to galloping/merge behavior (possibly super-linear) | active | 0.5 | R003 new hypothesis: speedup rises from 1.5x (1K) to 2.1x (5M) | 2026-02-23 |
-| 5 | Nearly-sortedness and high-duplicate structure compound to produce larger-than-single-factor speedups | active | 0.5 | R003 new hypothesis from combined-properties question | 2026-02-23 |
-| 6 | Duplicate-driven sorting speedups are larger for strings than floats due to higher comparison cost | active | 0.5 | R003 suggested follow-up: validate effect on string arrays | 2026-02-23 |
+| # | Parent | Belief | Status | Confidence | Key evidence | Last updated |
+|---|--------|--------|--------|------------|--------------|--------------|
+| 1 | — | Timsort's advantage over quicksort grows with nearly-sorted data | active | 0.7 | R001: 3.2x faster on 90%-sorted arrays (1M elements) | 2026-02-21 |
+| 2 | — | Memory allocation is the dominant cost for large arrays (>1M), not comparisons | active | 0.5 | R002: inconclusive — alloc time noisy | 2026-02-22 |
+| 3 | — | Duplicate-heavy distributions reduce sorting time due to equal-element optimizations | supported | 0.85 | R003: discriminating support; 95% duplicates gave 1.8x speedup at 1M and 2.1x at 5M; `list.sort()` matched while `heapq.nsmallest` showed only 1.05x | 2026-02-23 |
+| 4 | 3 | Timsort's galloping mode has a super-linear benefit with more duplicates as array size grows | active | 0.5 | R003 new hypothesis: scaling trend showed speedup increasing with size, suggesting size-dependent duplicate benefit | 2026-02-23 |
+| 5 | — | Nearly-sortedness and high duplicate ratios compound to produce larger sorting speedups than either factor alone | active | 0.5 | R003 new hypothesis: R001 nearly-sorted speedup and R003 duplicate speedup may compound on mixed-structure data | 2026-02-23 |
 
 ## Ledger
 
@@ -38,16 +38,16 @@
 |-----|-------|--------|---------|--------|------|
 | R001 | Compare timsort vs quicksort on nearly-sorted 1M arrays | discriminating | supports | #1 | [R001](REPORTS/R001.md) |
 | R002 | Profile memory allocation vs comparison time on random 5M arrays | partial | unclear | #2 | [R002](REPORTS/R002.md) |
-| R003 | Benchmark sorting on arrays with 0%, 50%, 80%, and 95% duplicate ratios across sizes 1K-5M | discriminating | supports | #3 | [R003](REPORTS/R003.md) |
+| R003 | Benchmark sorting with varying duplicate ratios | discriminating | supports | #3 | [R003](REPORTS/R003.md) |
 
 ## Frontier
 
-| Rank | Delta | Target | Rationale | Blocked by |
-|------|-------|--------|-----------|------------|
-| 1 | Isolate alloc cost by pre-allocating output buffer and rerun 1M/5M profiling with 50+ trials | #2 | Belief #2 remains maximally uncertain (0.5); directly addresses R002 noise | — |
-| 2 | Test combined effect: nearly-sorted + high-duplicate data across 100K-5M; compare against single-factor baselines | #5 | Directly tests whether speedups compound beyond additive expectations | — |
-| 3 | Instrument Timsort internals (or proxy counters) to quantify galloping/merge behavior vs duplicate ratio and size | #4 | Mechanism-focused discrimination for size-scaling hypothesis | — |
-| 4 | Replicate duplicate-ratio benchmark on string arrays and compare effect sizes vs float arrays | #6 | Tests whether higher comparison cost amplifies duplicate-related gains | — |
+| Rank | Delta | Target | Uncertainty | Info gain | Feasibility | Rationale | Blocked by |
+|------|-------|--------|-------------|-----------|-------------|-----------|------------|
+| 1 | Test combined effect: nearly-sorted + high-duplicate data. If speedups compound (>4x), it would explain why Timsort dominates on real-world benchmarks. | #5 | high | high | high | Direct test of the new compound-effects belief with a clear discriminating outcome either way | — |
+| 2 | Profile Timsort's internal merge operations with duplicates — count galloping steps vs element-by-element merges to confirm the mechanism. | #4 | high | high | med | Best direct mechanism test for the new size-scaling duplicate hypothesis | — |
+| 3 | Isolate alloc cost by pre-allocating output buffer | #2 | high | med | med | R002 remained noisy; this removes the suspected dominant cost directly | — |
+| 4 | Test with string arrays instead of floats — string comparison is more expensive, so algorithmic savings should be more visible. | #3 | low | med | high | Extends a now-supported belief to a more comparison-heavy datatype and checks practical scope | — |
 
 ## Policy
 
@@ -68,4 +68,3 @@
 
 ## Scratch
 - R002 had high variance in alloc measurements — might need to pin CPU frequency or use median of 50+ trials
-- R003 indicates strong duplicate effect in Timsort (up to 2.1x at 5M, 95% duplicates); mechanism follow-up now warranted

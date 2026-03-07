@@ -1,39 +1,37 @@
 # PLAN — R003
 
 ## Delta
-- **what**: Benchmark sorting latency on duplicate-heavy arrays at duplicate ratios 50%, 80%, and 95% across array sizes 1K, 10K, 100K, 1M, and 10M; compare against low-duplicate/random baseline from the same dataset split.
-- **intent**: Determine whether increasing duplicate ratio materially reduces sort time, and whether the effect size grows with input size.
-- **target belief**: #3 — Duplicate-heavy distributions reduce sorting time due to equal-element optimizations.
-- **type**: experiment
+- **what**: Isolate allocation cost on random arrays from `data/synthetic_arrays.npz` by benchmarking in-place sort versus workflows that force an explicit copy/allocation step on sizes 1M, 5M, and 10M, using repeated trials and per-size variance analysis across all 12 CPU cores.
+- **intent**: Resolve whether memory allocation is actually the dominant contributor for large-array sorting or whether R002's noisy measurements masked a smaller effect. This delta is selected by bandit reasoning: candidate `#2` targets belief `#2` at confidence `0.5` (highest uncertainty), offers medium-to-high info gain because forced-allocation versus in-place timings should separate costs cleanly, and has medium feasibility because variance control is required but the dataset and hardware already exist.
+- **target belief**: #2 — Memory allocation is the dominant cost for large arrays (>1M), not comparisons
+- **type**: analysis
 
 ## Resources
+<!-- Exact paths. Worker uses ONLY these — no assumptions, no substitutions. -->
+<!-- If a resource is missing, worker must BLOCKER. -->
 - **checkpoint**: N/A
-- **dataset**: `/Users/jianingqi/Github/delta-research/data/synthetic_arrays.npz`
-- **prior artifacts**: `/Users/jianingqi/Github/delta-research/REPORTS/R001.md`, `/Users/jianingqi/Github/delta-research/REPORTS/R002.md`
+- **dataset**: `data/synthetic_arrays.npz`
+- **prior artifacts**: N/A
 - **output dir**: RUNS/R003/artifacts/
 
 ## Commands
+<!-- Detailed step-by-step. Each step should explain WHAT to do and HOW to interpret results. -->
+<!-- Multiple analysis steps that build on each other. Not just "run a script". -->
 
-### Step 1: Validate inputs and extract benchmark matrix
-Confirm dataset exists and contains required distribution groups for duplicate ratios (50/80/95 or nearest matching labels), plus random baseline arrays for each target size. Build a run matrix of `(size, distribution, trial_id)` with at least 30 timing trials per cell. If exact duplicate labels are missing, map to closest available duplicate-heavy groups and record mapping explicitly in the report.
+### Step 1: Verify environment and extract random-array slices
+Activate `conda activate sorting-perf`, confirm Python 3.11.5 with the listed numpy/matplotlib/pandas versions, and work from `/home/user/sorting-perf`. Load `data/synthetic_arrays.npz`, identify the random-distribution arrays for sizes 1M, 5M, and 10M, and record their exact keys, dtypes, and shapes in the report. If the file does not contain those random arrays exactly, stop with BLOCKER because the plan depends on the Environment-defined dataset.
 
-### Step 2: Execute controlled timing benchmark
-For each matrix cell, run Python built-in sort (`list.sort()` or equivalent consistent path) under consistent process conditions: warm-up runs, fixed seed order, repeated trials, and median + IQR capture. Record raw trial times to `RUNS/R003/artifacts/timing_raw.csv` and summary table to `RUNS/R003/artifacts/timing_summary.csv`.
+### Step 2: Build an allocation-isolation benchmark with controlled variants
+For each selected random array size, benchmark at least three variants: `(a)` in-place sort on a reused mutable copy, `(b)` explicit allocate-or-copy step immediately followed by sort, and `(c)` allocation-or-copy only without sorting. Run enough repetitions to stabilize medians and dispersion, with a minimum of 50 trials per size/variant unless the time budget forces fewer for 10M arrays. Use multiprocessing to saturate all 12 CPU cores by distributing independent trials across workers. The interpretation logic is: if variant `(c)` plus the gap between `(a)` and `(b)` accounts for most end-to-end time, allocation dominance is supported; if sorting time in `(a)` remains the majority term, the belief is contradicted.
 
-### Step 3: Quantify duplicate-ratio effect size
-Compute per-size speedup ratios relative to random baseline: `speedup = median_time_random / median_time_duplicate_ratio`. Estimate uncertainty via bootstrap 95% CI (or nonparametric CI from trial medians). Mark each size/ratio cell as:
-- supports-local if CI lower bound > 1.05
-- contradicts-local if CI upper bound < 1.00
-- unclear-local otherwise
+### Step 3: Quantify variance and attribution, not just averages
+For every size and variant, compute median, mean, standard deviation, coefficient of variation, and 5th/95th percentile timing. Then derive an attribution table with estimated `allocation_share = median(copy_only) / median(copy_plus_sort)` and `comparison_share = median(in_place_sort) / median(copy_plus_sort)`. Focus interpretation on medians and percentile spread because R002 was explicitly noisy. If variance remains high, report whether the conclusion is still directionally stable across median-based estimates.
 
-### Step 4: Trend and robustness checks
-Test monotonicity by checking whether speedup(95%) >= speedup(80%) >= speedup(50%) for each size (allow 5% tolerance for near-equality). Run sensitivity check using trimmed mean (10%) in addition to median; if conclusions differ, flag confound and downgrade signal strength.
+### Step 4: Test the belief threshold across sizes
+Compare attribution across 1M, 5M, and 10M arrays to check whether the hypothesis only emerges at the upper end of the size range. Use the exact same benchmarking code path for all sizes so differences are attributable to scale rather than implementation drift. Interpret results by size: if allocation share rises and exceeds 50% only at 10M, the belief is partially supported with a size threshold; if it stays below 50% at all sizes, the dominance claim is contradicted.
 
-### Step 5: Visualize and decision mapping
-Generate plots:
-- `RUNS/R003/artifacts/speedup_vs_size.png` (lines by duplicate ratio)
-- `RUNS/R003/artifacts/time_distribution_boxplots.png` (per size/ratio)
-Produce a decision table mapping observed outcomes to Belief #3 update direction (supports/contradicts/unclear).
+### Step 5: Visualize and stress-check the conclusion
+Generate at least two plots in `RUNS/R003/artifacts/`: one plot of median time by size and variant, and one stacked or side-by-side plot of estimated allocation versus in-place-sort contribution by size. Add a short stress check by comparing conclusions from medians against means; if they disagree materially, call that out as a confound rather than smoothing it away.
 
 ### Final step: Write report
 Write report to REPORTS/R003.md following the report template.
@@ -42,29 +40,35 @@ Include all data inline, generate visualizations, embed plots with ![](path).
 ## Success metrics
 | Metric | Baseline | Target | How to measure |
 |--------|----------|--------|----------------|
-| Median speedup for 95% duplicates vs random at >=3 largest sizes (100K/1M/10M) | Unknown (untested) | >1.20 supports belief | Compute median-time ratio with 95% CI from repeated trials |
-| Monotonic duplicate effect (95% >= 80% >= 50%) across sizes | Unknown (untested) | Holds for >=4/5 sizes supports mechanism consistency | Compare per-size speedup ladder with 5% tolerance |
-| Evidence against belief | Unknown (untested) | Speedup ~1.0 or <1.0 for most sizes contradicts belief | CI-based classification contradicts-local in >=3/5 sizes |
+| Allocation share on 5M random arrays | R002 inconclusive due to noisy allocation timing | `> 0.50` supports the belief that allocation is dominant at large sizes | `median(copy_only) / median(copy_plus_sort)` from repeated trials |
+| Allocation share on 10M random arrays | R002 inconclusive due to noisy allocation timing | `> 0.50` strongly supports; `< 0.35` contradicts dominance | Same attribution calculation on 10M random arrays |
+| Variance control | R002 described alloc timing as noisy | Coefficient of variation low enough that median-based ranking of variants is stable across sizes | Compare coefficient of variation and 5th/95th percentile spread for each variant |
+| Size trend | No confirmed scaling trend yet | Allocation share increases from 1M to 10M if dominance is real | Compare attribution table across 1M, 5M, and 10M |
 
 ## Stop conditions
-- BLOCKER if: required dataset groups (random + duplicate-heavy at target ratios or mappable equivalents) are absent.
-- BLOCKER if: benchmark cannot complete at least 20 valid trials per cell after retries.
+- BLOCKER if: `data/synthetic_arrays.npz` does not contain random arrays for sizes 1M, 5M, and 10M
+- BLOCKER if: the environment cannot activate `sorting-perf` or listed packages are unavailable
+- BLOCKER if: timing noise remains so extreme that medians do not provide a stable ordering between in-place sort, copy+sort, and copy-only after the planned repetitions
 - BLOCKER if: resource not found at specified path
 - TIMEOUT after: 90 minutes
 
 ## Context
+<!-- Rich context from STATE.md. Include specific numbers, prior findings, anomalies. -->
+<!-- Reference specific report files and data artifacts the worker may need. -->
 
 **Relevant beliefs:**
-- Belief #3 (confidence 0.45): Duplicate-heavy distributions reduce sorting time due to equal-element optimizations — currently seed-only, untested.
-- Belief #2 (confidence 0.5): Allocation-cost claim remained unclear in R002 due to noise; this run should avoid over-interpreting alloc effects and focus on distribution-driven timing differences.
+- Belief #2 (confidence `0.5`): Memory allocation is the dominant cost for large arrays (`>1M`), not comparisons — current evidence is explicitly inconclusive from R002 because allocation timing was noisy, making this the most uncertain belief and the best next bandit target.
+- Belief #3 (confidence `0.45`): Duplicate-heavy distributions reduce sorting time due to equal-element optimizations — also uncertain, but slightly farther from `0.5`; defer until belief #2 is resolved or down-ranked with stronger evidence.
+- Belief #1 (confidence `0.7`): Timsort's advantage over quicksort grows with nearly-sorted data — currently less uncertain and not the next best discriminator.
 
 **Prior findings:**
-- R001: On nearly-sorted arrays (1M), timsort was 3.2x faster than quicksort, showing distribution strongly affects runtime.
-- R002: Allocation vs comparison isolation on random 5M arrays was inconclusive due to high variance in alloc measurements.
-- Scratch note in STATE: variance issues suggest robust aggregation (median, many trials) is necessary; this plan uses >=30 trials/cell and CI-based decisions.
+- R001: On `1M` element `90%`-sorted arrays, timsort was `3.2x` faster than quicksort, which raised belief #1 to confidence `0.7`.
+- R002: Profiling on random `5M` arrays produced only a `partial` signal and `unclear` verdict for belief #2 because allocation measurements were noisy rather than cleanly separable.
+- Frontier comparison for this planning pass: candidate for belief `#3` had uncertainty `high` at confidence `0.45`, info gain `high`, feasibility `high`; candidate for belief `#2` had uncertainty `high` at confidence `0.5`, info gain `med`, feasibility `med`. This run selects `#2` because the confidence is nearest `0.5`, satisfying the supervisor rule to target the most uncertain belief first.
+- Available hardware from Environment is CPU-only with `12` cores on an AMD Ryzen 9 5900X and `gpu: N/A`, so the run should maximize throughput with parallel trial execution across all CPU cores rather than leaving repetitions serialized.
 
 ## Meta
 - **run_id**: R003
-- **created**: 2026-02-26
-- **time_budget**: 90
+- **created**: 2026-03-07
+- **time_budget**: 90 minutes
 - **status**: planned

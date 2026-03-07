@@ -1,104 +1,92 @@
 # REPORT — R003
 
 ## Summary
-I benchmarked Python `sorted()` on synthetic arrays with duplicate ratios of 0%, 50%, 80%, and 95% across sizes from 1K to 5M elements, using 5 repetitions per configuration and median as the primary metric. Sorting became consistently faster as duplicate ratio increased, with strong effects at 95% duplicates (for 1M elements: 3.63x speedup vs baseline). This strongly supports belief #3 that duplicate-heavy distributions reduce sorting time.
+I benchmarked Python's `sorted()` on synthetic float arrays from 1,000 to 5,000,000 elements with 0%, 50%, 80%, and 95% duplicates. Duplicate-heavy inputs sorted faster at every tested size, with the key checkpoint at 1,000,000 elements showing a `7.92x` speedup at 95% duplicates versus the fully random baseline. This strongly supports belief #3's empirical claim that duplicate-heavy distributions reduce sort time, although the mechanism remains somewhat confounded.
 
 ## Motivation
-This run tests belief #3 (confidence 0.45): duplicate-heavy distributions reduce sorting time due to equal-element optimization effects. Per plan thresholds: speedup >1.2x at 95% duplicates (1M) supports the belief; speedup <1.05x across ratios would contradict it.
+This run tested belief #3: duplicate-heavy distributions reduce sorting time due to equal-element optimizations. The plan defined support as a speedup above `1.2x` at 95% duplicates for 1,000,000 elements, and contradiction as staying below `1.05x` across ratios. A strong positive result would establish that repeated values are a major source of structure that Python's sort can exploit.
 
 ## Method
-1. Used `/Users/jianingqi/miniconda3/envs/agentlab/bin/python` and verified required packages were available there.
-2. Generated arrays for sizes `[1_000, 10_000, 100_000, 1_000_000, 5_000_000]` with duplicate ratios `[0.0, 0.5, 0.8, 0.95]`.
-3. For each `(size, ratio)`, filled `ratio * size` randomly selected positions with `42.0`; remaining values were random floats. Reproducibility used deterministic seeds derived from base seed 42.
-4. Timed `sorted(array.tolist())` for 5 repetitions, recording median/min/max and variance ratio (`max/min`).
-5. For confound check, also timed `list.sort()` on `array.tolist()` for the same repetitions.
-6. Computed speedup per size as `baseline_median(0% dup) / median(dup_ratio)`.
-7. Saved raw data and plots under `tests/worker_execution/artifacts/`.
+Using Python 3.10.10, I generated synthetic arrays inline with `random.seed(42)` and exact duplicate ratios of `0%`, `50%`, `80%`, and `95%`. For each size in `[1_000, 10_000, 100_000, 1_000_000, 5_000_000]`, I filled the duplicate fraction with `42.0`, filled the remainder with uniform random floats, shuffled the list, and timed `sorted(array)` for 5 repetitions with `time.perf_counter()`.
+
+For each `(size, duplicate_ratio)` pair, I recorded median, min, max, and max/min variance ratio, then computed speedup relative to the same-size `0%` duplicate baseline. To probe the confound suggested in the plan, I also benchmarked `list.sort()` at 1,000,000 elements for `0%` and `95%` duplicates, again with 5 repetitions, and compared the resulting speedups.
 
 ## Results
 
 ### Data
+| Size | Duplicate ratio | Median `sorted()` (s) | Min (s) | Max (s) | Max/Min | Speedup vs 0% |
+|--------|-------:|-------:|-------:|-------:|-------:|-------:|
+| 1,000 | 0% | 0.000062 | 0.000057 | 0.000082 | 1.45 | 1.00x |
+| 1,000 | 50% | 0.000051 | 0.000044 | 0.000065 | 1.47 | 1.23x |
+| 1,000 | 80% | 0.000035 | 0.000030 | 0.000040 | 1.34 | 1.81x |
+| 1,000 | 95% | 0.000021 | 0.000020 | 0.000024 | 1.19 | 2.93x |
+| 10,000 | 0% | 0.000986 | 0.000939 | 0.001078 | 1.15 | 1.00x |
+| 10,000 | 50% | 0.000627 | 0.000622 | 0.000693 | 1.11 | 1.57x |
+| 10,000 | 80% | 0.000363 | 0.000356 | 0.000434 | 1.22 | 2.71x |
+| 10,000 | 95% | 0.000183 | 0.000177 | 0.000256 | 1.45 | 5.38x |
+| 100,000 | 0% | 0.010518 | 0.010279 | 0.010625 | 1.03 | 1.00x |
+| 100,000 | 50% | 0.006633 | 0.006506 | 0.007478 | 1.15 | 1.59x |
+| 100,000 | 80% | 0.003692 | 0.003594 | 0.004085 | 1.14 | 2.85x |
+| 100,000 | 95% | 0.001981 | 0.001904 | 0.002153 | 1.13 | 5.31x |
+| 1,000,000 | 0% | 0.181856 | 0.169469 | 0.230848 | 1.36 | 1.00x |
+| 1,000,000 | 50% | 0.099566 | 0.090071 | 0.104925 | 1.16 | 1.83x |
+| 1,000,000 | 80% | 0.043185 | 0.041033 | 0.047518 | 1.16 | 4.21x |
+| 1,000,000 | 95% | 0.022954 | 0.021585 | 0.025514 | 1.18 | 7.92x |
+| 5,000,000 | 0% | 1.156538 | 1.147664 | 1.162696 | 1.01 | 1.00x |
+| 5,000,000 | 50% | 0.599359 | 0.596923 | 0.676301 | 1.13 | 1.93x |
+| 5,000,000 | 80% | 0.291321 | 0.284090 | 0.330064 | 1.16 | 3.97x |
+| 5,000,000 | 95% | 0.129179 | 0.120082 | 0.132857 | 1.11 | 8.95x |
 
-| Size | Dup % | `sorted()` median (s) | min (s) | max (s) | max/min | `list.sort()` median (s) |
-|------|-------|------------------------|---------|---------|---------|---------------------------|
-| 1,000 | 0 | 0.000063 | 0.000058 | 0.000078 | 1.34 | 0.000053 |
-| 1,000 | 50 | 0.000045 | 0.000043 | 0.000056 | 1.31 | 0.000041 |
-| 1,000 | 80 | 0.000031 | 0.000029 | 0.000037 | 1.26 | 0.000028 |
-| 1,000 | 95 | 0.000022 | 0.000021 | 0.000025 | 1.16 | 0.000020 |
-| 10,000 | 0 | 0.000907 | 0.000847 | 0.000928 | 1.10 | 0.000893 |
-| 10,000 | 50 | 0.000635 | 0.000610 | 0.000668 | 1.10 | 0.000602 |
-| 10,000 | 80 | 0.000386 | 0.000375 | 0.000432 | 1.15 | 0.000368 |
-| 10,000 | 95 | 0.000244 | 0.000237 | 0.000259 | 1.10 | 0.000219 |
-| 100,000 | 0 | 0.011895 | 0.011028 | 0.012851 | 1.17 | 0.011393 |
-| 100,000 | 50 | 0.007971 | 0.007574 | 0.008497 | 1.12 | 0.007994 |
-| 100,000 | 80 | 0.004558 | 0.004408 | 0.005050 | 1.15 | 0.004279 |
-| 100,000 | 95 | 0.002647 | 0.002597 | 0.002825 | 1.09 | 0.002470 |
-| 1,000,000 | 0 | 0.159403 | 0.147269 | 0.167614 | 1.14 | 0.163908 |
-| 1,000,000 | 50 | 0.104756 | 0.098788 | 0.113545 | 1.15 | 0.099721 |
-| 1,000,000 | 80 | 0.060157 | 0.057925 | 0.065706 | 1.13 | 0.056692 |
-| 1,000,000 | 95 | 0.043967 | 0.039685 | 0.044569 | 1.12 | 0.036276 |
-| 5,000,000 | 0 | 0.912968 | 0.839873 | 0.922148 | 1.10 | 0.904347 |
-| 5,000,000 | 50 | 0.623456 | 0.605593 | 0.655233 | 1.08 | 0.609785 |
-| 5,000,000 | 80 | 0.355789 | 0.344005 | 0.377202 | 1.10 | 0.333328 |
-| 5,000,000 | 95 | 0.191562 | 0.188248 | 0.210146 | 1.12 | 0.194142 |
-
-Speedup of `sorted()` vs 0% duplicate baseline:
-
-| Size | 50% dup | 80% dup | 95% dup |
-|------|---------|---------|---------|
-| 1,000 | 1.40x | 2.06x | 2.86x |
-| 10,000 | 1.43x | 2.35x | 3.72x |
-| 100,000 | 1.49x | 2.61x | 4.49x |
-| 1,000,000 | 1.52x | 2.65x | 3.63x |
-| 5,000,000 | 1.46x | 2.57x | 4.77x |
-
-Threshold check (from plan):
-- Speedup at 95% duplicates, 1M elements = **3.63x** (>1.2x target, supports belief)
-- Variance reliability: all measured `max/min` ratios were <2.0 (and far below blocker threshold 5.0)
+| Confound check at 1,000,000 elements | Value | Notes |
+|--------|-------:|-------|
+| `sorted()` median at 0% duplicates | 0.176132 s | Baseline for confound check |
+| `sorted()` median at 95% duplicates | 0.022785 s | `7.73x` faster than 0% |
+| `list.sort()` median at 0% duplicates | 0.165157 s | In-place sort baseline |
+| `list.sort()` median at 95% duplicates | 0.020127 s | `8.21x` faster than 0% |
+| Largest observed speedup | 8.95x | `sorted()`, 5,000,000 elements, 95% duplicates |
+| Smallest observed speedup above baseline | 1.23x | `sorted()`, 1,000 elements, 50% duplicates |
+| Stop-condition violations | 0 | No run exceeded 5 minutes; no variance ratio exceeded 5x |
 
 ### Visualizations
-![Median sort time vs size](tests/worker_execution/artifacts/plot1_median_time_vs_size.png)
-![Speedup vs duplicate ratio](tests/worker_execution/artifacts/plot2_speedup_vs_duplicate_ratio.png)
-![Confound check sorted vs list.sort](tests/worker_execution/artifacts/plot3_confound_sorted_vs_listsort.png)
+![Median sort time vs array size](artifacts/median_sort_time_vs_size.svg)
+
+![Speedup vs duplicate ratio](artifacts/speedup_vs_duplicate_ratio.svg)
 
 ### Analysis
-Results show a strong monotonic trend: higher duplicate ratios consistently reduce sort times, and the effect grows with problem size. The discriminating criterion was exceeded by a wide margin (3.63x at 1M, 95% duplicates), so evidence is high-signal rather than marginal.
+The effect is monotonic in both duplicate ratio and array size. At every size, more duplicates produced lower median runtime, and the improvement accelerated sharply between `80%` and `95%` duplicates. The plan's main decision threshold was crossed by a wide margin: at 1,000,000 elements and 95% duplicates, the measured speedup was `7.92x`, not merely above `1.2x`.
 
-The confound check (`sorted()` vs `list.sort()`) shows both methods gain similar speedups as duplicates increase. That pattern suggests the effect is not specific to one Python API path and is consistent with core sort behavior under duplicate-heavy keys (likely reduced effective comparison work and favorable run behavior). It does not isolate cache/memory vs comparator-structure effects by itself, but it does confirm the phenomenon is robust across both call styles.
+The confound check shows the speedup is not unique to the `sorted()` wrapper. `sorted()` and `list.sort()` both improved by roughly eightfold at 95% duplicates on 1,000,000 elements, which is consistent with repeated-key structure making comparisons or merges much cheaper for Python's underlying Timsort implementation. That supports the existence of a real duplicate-driven effect, but it does not isolate whether the mechanism is specifically "equal-element optimizations" versus a broader reduction in comparison work caused by repeated keys.
 
 ## Signal
 - **discrimination**: discriminating
-- The tested delta clearly separated expected outcomes: speedups were large and consistent, not near-noise.
-- Key observation: at fixed size, speedup scales strongly with duplicate ratio; at high duplicate ratios, large arrays show multi-x gains.
+- The result clearly separates belief #3 from the null case because the observed speedups are far above the plan's support threshold and appear at every tested scale.
+- The strongest single observation is `7.92x` speedup at 1,000,000 elements and `8.95x` at 5,000,000 elements for 95% duplicates.
 
 ## Verdict
-**supports** — belief #3: duplicate-heavy distributions substantially reduce sorting time in Python `sorted()` under this synthetic setup.
+**supports** — belief #3: duplicate-heavy distributions do reduce Python sort time by a large margin on this benchmark, though the exact causal mechanism remains partially confounded.
 
 ## Confounds
-- Data construction uses one duplicated value (`42.0`), which is an extreme duplicate pattern; real distributions with many repeated but non-identical values may behave differently.
-- Benchmark includes `array.tolist()` each repetition, so timings combine conversion + sorting costs. Relative effects remain clear but pure sort-only effects may differ.
-- Single-machine run; CPU state/background load may affect absolute times.
+- `sorted()` and `list.sort()` share the same underlying sort implementation in CPython, so this check does not cleanly distinguish wrapper effects from algorithm-level behavior.
+- Replacing many random values with the constant `42.0` changes both duplicate rate and comparison structure, so the benchmark cannot separate repeated-key effects from any cache or memory-locality changes induced by a narrower value distribution.
+- The arrays contain only floats; the magnitude of the effect could differ for richer Python objects with more expensive comparison semantics.
 
 ## New hypotheses
-- Duplicate-ratio speedup may saturate beyond a dataset-dependent threshold (e.g., diminishing improvement between 80% and 95% for some sizes).
+- Repeated keys primarily reduce comparison work inside Timsort, and any equal-element-specific fast path is secondary. [parent: #3]
+- The duplicate-driven speedup grows with `N` because repeated-key runs create merge patterns that become disproportionately favorable at larger scales. [parent: #3]
+- For custom Python objects with expensive `__lt__`, duplicate-heavy inputs will produce an even larger speedup than floats. [parent: #3]
 
 ## Next tests
-1. Isolate conversion overhead by benchmarking pre-built Python lists only, then compare with current results.
-2. Repeat with multi-valued duplicate distributions (e.g., 10, 100, 1000 unique values) to map speedup vs cardinality, not only one repeated value.
-3. Vary data order structure (random vs partially sorted + duplicates) to test interaction between run detection and duplicate effects.
+1. Instrument comparison counts with a custom comparable object to test whether duplicate-heavy inputs reduce the number of `__lt__` calls enough to explain the runtime drop.
+2. Compare CPython `sorted()` against an alternative implementation such as `numpy.sort()` or a pure-Python merge/quicksort baseline on the same duplicated workloads to isolate Timsort-specific behavior.
+3. Hold the value range fixed while varying only duplicate placement or run structure to distinguish repeated-key effects from general data-layout or cache effects.
 
 ## Artifacts
-- `tests/worker_execution/artifacts/timings.csv` — per-configuration median/min/max/variance for `sorted()` and `list.sort()`.
-- `tests/worker_execution/artifacts/speedups.csv` — computed speedup vs 0%-duplicate baseline.
-- `tests/worker_execution/artifacts/raw_results.json` — raw repetition-level timings and run status.
-- `tests/worker_execution/artifacts/plot1_median_time_vs_size.png` — log-log time scaling by duplicate ratio.
-- `tests/worker_execution/artifacts/plot2_speedup_vs_duplicate_ratio.png` — speedup curves by size.
-- `tests/worker_execution/artifacts/plot3_confound_sorted_vs_listsort.png` — confound comparison across APIs.
-- `tests/worker_execution/artifacts/run_summary.json` — compact execution summary.
+- `artifacts/median_sort_time_vs_size.svg` — log-log plot of median `sorted()` runtime versus array size for each duplicate ratio.
+- `artifacts/speedup_vs_duplicate_ratio.svg` — speedup versus duplicate ratio for each tested array size.
 
 ## Meta
 - **run_id**: R003
-- **delta**: benchmark `sorted()` with varying duplicate ratios and compare against baseline plus `list.sort()` confound check
-- **started**: 2026-02-25T20:53:25 (local, inferred from runtime)
-- **completed**: 2026-02-25T20:53:51 (local)
+- **delta**: Benchmark Python `sorted()` on synthetic arrays with duplicate ratios of 0%, 50%, 80%, and 95% across sizes 1,000 to 5,000,000.
+- **started**: 2026-03-07 18:06:57 -0500
+- **completed**: 2026-03-07 18:07:21 -0500
 - **status**: completed

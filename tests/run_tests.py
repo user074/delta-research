@@ -11,6 +11,7 @@ Usage:
   python tests/run_tests.py                    # validate existing outputs
   python tests/run_tests.py --run              # generate outputs with claude, then validate
   python tests/run_tests.py --run --agent codex  # use codex instead
+  python tests/run_tests.py --review           # LLM reviews outputs against templates
   python tests/run_tests.py --debug            # show parsed data for debugging
 """
 
@@ -438,30 +439,161 @@ def validate_state_compression(
 # Agent runner
 # ---------------------------------------------------------------------------
 
+REVIEW_PROMPTS = {
+    "plan_generation": (
+        "You are a quality reviewer for an LLM-driven research loop. "
+        "Your job is to evaluate whether the generated plan follows the templates and rules.\n\n"
+        "Read these files:\n"
+        "1. The PLAN template: {plan_template}\n"
+        "2. The SUPERVISOR spec (especially Phase 2 bandit reasoning and Phase 3 plan requirements): {supervisor}\n"
+        "3. The input STATE: {state}\n"
+        "4. The generated output: {output}\n\n"
+        "Evaluate the output against the template and supervisor rules. Report:\n\n"
+        "## Compliance\n"
+        "For each requirement below, say PASS or FAIL with a one-line reason:\n"
+        "- All template sections present (Delta, Resources, Commands, Success metrics, Stop conditions, Context, Meta)\n"
+        "- Delta targets the most uncertain belief(s) (confidence nearest 0.5)\n"
+        "- Bandit reasoning: does it show awareness of uncertainty, info gain, and feasibility?\n"
+        "- Commands have multiple substantive steps (not just 'run a script')\n"
+        "- Resources specify exact paths from STATE.md Environment (not made-up paths)\n"
+        "- Context references specific numbers from prior runs (not vague 'see R001')\n"
+        "- Success metrics define clear support vs contradict thresholds\n"
+        "- Hardware utilization: does the plan maximize available compute (GPUs, CPU cores) from Environment?\n"
+        "- Stop conditions are specific and actionable\n\n"
+        "## Quality issues\n"
+        "List any problems with the LLM output — vagueness, hallucinated data, "
+        "missing context, wrong belief targeting, logical gaps, or anything a supervisor "
+        "should have caught.\n\n"
+        "## What's good\n"
+        "Note anything the output does particularly well.\n\n"
+        "## Verdict\n"
+        "Overall: SATISFACTORY or NEEDS IMPROVEMENT, with a 1-2 sentence summary.\n\n"
+        "Write your review to {review_output}. Do NOT modify any other files."
+    ),
+    "worker_execution": (
+        "You are a quality reviewer for an LLM-driven research loop. "
+        "Your job is to evaluate whether the generated report follows the templates and rules.\n\n"
+        "Read these files:\n"
+        "1. The REPORT template: {report_template}\n"
+        "2. The SUPERVISOR spec (especially Section 4 Worker Prompt Template): {supervisor}\n"
+        "3. The generated output: {output}\n\n"
+        "Evaluate the output against the template and worker contract. Report:\n\n"
+        "## Compliance\n"
+        "For each requirement below, say PASS or FAIL with a one-line reason:\n"
+        "- All template sections present (Summary, Motivation, Method, Results/Data/Visualizations/Analysis, "
+        "Signal, Verdict, Confounds, New hypotheses, Next tests, Artifacts, Meta)\n"
+        "- Summary is concise and self-contained (a researcher could understand what happened)\n"
+        "- Data is inline — actual numbers in tables, not just pointers to files\n"
+        "- Visualizations are embedded with ![](path) syntax\n"
+        "- Analysis interprets results (not just restating numbers)\n"
+        "- Signal uses valid values (discriminating/partial/null) with reasoning\n"
+        "- Verdict uses valid values (supports/contradicts/unclear/BLOCKER) and references a belief #\n"
+        "- New hypotheses include parent belief hints [parent: #N or —]\n"
+        "- Confounds section identifies real alternative explanations\n"
+        "- Next tests suggest concrete follow-up deltas\n\n"
+        "## Quality issues\n"
+        "List any problems — fabricated results, missing interpretation, "
+        "inconsistencies between data and verdict, vague confounds, "
+        "or anything that would mislead the supervisor.\n\n"
+        "## What's good\n"
+        "Note anything the output does particularly well.\n\n"
+        "## Verdict\n"
+        "Overall: SATISFACTORY or NEEDS IMPROVEMENT, with a 1-2 sentence summary.\n\n"
+        "Write your review to {review_output}. Do NOT modify any other files."
+    ),
+    "state_compression": (
+        "You are a quality reviewer for an LLM-driven research loop. "
+        "Your job is to evaluate whether state compression was done correctly.\n\n"
+        "Read these files:\n"
+        "1. The STATE template: {state_template}\n"
+        "2. The SUPERVISOR spec (especially Section 5 State Compression Rules): {supervisor}\n"
+        "3. The input STATE (before): {state_before}\n"
+        "4. The REPORT being ingested: {report}\n"
+        "5. The generated output STATE (after): {output}\n\n"
+        "Evaluate the compression against the rules. Report:\n\n"
+        "## Compliance\n"
+        "For each requirement below, say PASS or FAIL with a one-line reason:\n"
+        "- Ledger: new row appended with correct run ID, delta, signal, verdict, belief, link\n"
+        "- BeliefState: confidence updated in the right direction (report says supports → increase)\n"
+        "- BeliefState: confidence magnitude is reasonable (not too aggressive, not too timid)\n"
+        "- BeliefState: status updated correctly (≥0.8 → supported, ≤0.2 → rejected)\n"
+        "- BeliefState: Parent column present with values for all beliefs\n"
+        "- New beliefs: added from report's New hypotheses with confidence 0.5\n"
+        "- New beliefs: Parent field populated (from [parent: #N] hints in report)\n"
+        "- Frontier: completed delta removed\n"
+        "- Frontier: new entries added for new beliefs\n"
+        "- Frontier: scoring dimensions present (Uncertainty, Info gain, Feasibility)\n"
+        "- Frontier: ranking makes sense (high-uncertainty + high-info-gain first)\n"
+        "- Meta: total_runs incremented, last_updated changed\n"
+        "- Meta: paradigm field present\n"
+        "- Paradigm shift: if a belief was rejected or dropped ≥0.3, were children flagged?\n\n"
+        "## Quality issues\n"
+        "List any problems — wrong confidence direction, missing beliefs, "
+        "frontier not re-ranked properly, paradigm shift missed, "
+        "or information lost during compression.\n\n"
+        "## What's good\n"
+        "Note anything the output does particularly well.\n\n"
+        "## Verdict\n"
+        "Overall: SATISFACTORY or NEEDS IMPROVEMENT, with a 1-2 sentence summary.\n\n"
+        "Write your review to {review_output}. Do NOT modify any other files."
+    ),
+}
+
+
 PROMPTS = {
     "plan_generation": (
         "You are a research supervisor. "
-        "Read {supervisor} section 2 (Supervisor Loop). "
-        "Read the current state from {input}. "
-        "Generate a plan for the next run. "
-        "Write it to {output}. "
-        "Do NOT modify any other files."
+        "Read {supervisor} — focus on section 2 (Supervisor Loop) for the planning process "
+        "and section 3 (Contracts) for rules.\n\n"
+        "Read the plan template at {plan_template} — your output MUST use this exact structure "
+        "with these exact section headings: Delta, Resources, Commands, Success metrics, "
+        "Stop conditions, Context, Meta.\n\n"
+        "Read the current state from {input}.\n\n"
+        "Generate a plan for the next run following Phase 2 (Select delta) and Phase 3 (Create run) rules:\n"
+        "- Use bandit reasoning: assess Uncertainty, Info gain, Feasibility for candidates\n"
+        "- Target the most uncertain belief (confidence nearest 0.5)\n"
+        "- Resources must use exact paths from STATE.md Environment — do not invent paths\n"
+        "- Commands must have multiple substantive analysis steps\n"
+        "- Context must reference specific numbers from prior runs\n"
+        "- If hardware is available (GPUs, multiple CPU cores), plan to maximize utilization\n\n"
+        "Write the plan to {output}. Do NOT modify any other files."
     ),
     "worker_execution": (
-        "You are a research worker. "
-        "Read the contract in {supervisor} section 4 (Worker Prompt Template). "
-        "Your plan is in {input}. "
-        "Execute the plan and write your report to {output}. "
-        "Save artifacts to tests/worker_execution/artifacts/. "
-        "Do NOT modify any other files."
+        "You are a research worker.\n\n"
+        "Read {supervisor} section 4 (Worker Prompt Template) for the contract and rules.\n\n"
+        "Read the report template at {report_template} — your output MUST use this exact structure "
+        "with these exact section headings in this order: "
+        "Summary, Motivation, Method, Results (with sub-sections Data, Visualizations, Analysis), "
+        "Signal, Verdict, Confounds, New hypotheses, Next tests, Artifacts, Meta.\n\n"
+        "CRITICAL: Use the EXACT section headings from the template. Do not rename, reorder, "
+        "or use alternative headings. The supervisor parses these by name.\n\n"
+        "Your plan is in {input}. Execute the plan.\n\n"
+        "Additional rules:\n"
+        "- All data must be inline in tables (not just file references)\n"
+        "- Generate visualizations and embed with ![description](path)\n"
+        "- Signal must be one of: discriminating | partial | null\n"
+        "- Verdict must be one of: supports | contradicts | unclear | BLOCKER, referencing a belief #\n"
+        "- New hypotheses must include [parent: #N or —] hints\n"
+        "- Save artifacts to tests/worker_execution/artifacts/\n\n"
+        "Write the report to {output}. Do NOT modify any other files."
     ),
     "state_compression": (
-        "You are a research supervisor. "
-        "Read {supervisor} section 5 (State Compression Rules). "
-        "The current state is in {state_before}. "
-        "The report to ingest is in {report}. "
-        "Produce the updated state and write it to {output}. "
-        "Do NOT modify any other files."
+        "You are a research supervisor.\n\n"
+        "Read {supervisor} section 5 (State Compression Rules) for the exact update procedure.\n\n"
+        "Read the state template at {state_template} — your output MUST follow this structure "
+        "including: Parent column in BeliefState, paradigm in Meta, "
+        "and Uncertainty/Info gain/Feasibility columns in Frontier.\n\n"
+        "The current state is in {state_before}.\n"
+        "The report to ingest is in {report}.\n\n"
+        "Apply compression rules:\n"
+        "- Append to Ledger (use exact delta description from the report, not paraphrased)\n"
+        "- Update belief confidence in the correct direction and magnitude\n"
+        "- Add new beliefs from report's New hypotheses at confidence 0.5 with Parent field\n"
+        "- Remove completed delta from Frontier, add new entries for new beliefs\n"
+        "- Score frontier entries on Uncertainty, Info gain, Feasibility and re-rank\n"
+        "- Check for paradigm shift if any belief was rejected or dropped ≥0.3\n"
+        "- Update Meta (total_runs, last_updated, paradigm if shift occurred)\n\n"
+        "Produce the updated state and write it to {output}. Do NOT modify any other files."
     ),
 }
 
@@ -469,21 +601,26 @@ PROMPTS = {
 def run_agent(test_name: str, agent: str = "claude"):
     """Spawn the agent for a test case."""
 
+    templates = ROOT / "templates"
+
     if test_name == "plan_generation":
         prompt = PROMPTS[test_name].format(
             supervisor=SUPERVISOR,
+            plan_template=templates / "PLAN.template.md",
             input=TESTS / "plan_generation" / "STATE.md",
             output=TESTS / "plan_generation" / "output_PLAN.md",
         )
     elif test_name == "worker_execution":
         prompt = PROMPTS[test_name].format(
             supervisor=SUPERVISOR,
+            report_template=templates / "REPORT.template.md",
             input=TESTS / "worker_execution" / "PLAN.md",
             output=TESTS / "worker_execution" / "output_REPORT.md",
         )
     elif test_name == "state_compression":
         prompt = PROMPTS[test_name].format(
             supervisor=SUPERVISOR,
+            state_template=templates / "STATE.template.md",
             state_before=TESTS / "state_compression" / "STATE_before.md",
             report=TESTS / "state_compression" / "REPORT.md",
             output=TESTS / "state_compression" / "output_STATE_after.md",
@@ -517,6 +654,77 @@ def run_agent(test_name: str, agent: str = "claude"):
         print(f"Agent timed out after 300s")
 
 
+def review_agent(test_name: str, agent: str = "claude"):
+    """Spawn the agent to review a test output against templates."""
+
+    templates = ROOT / "templates"
+
+    if test_name == "plan_generation":
+        output = TESTS / "plan_generation" / "output_PLAN.md"
+        review_output = TESTS / "plan_generation" / "review_PLAN.md"
+        prompt = REVIEW_PROMPTS[test_name].format(
+            plan_template=templates / "PLAN.template.md",
+            supervisor=SUPERVISOR,
+            state=TESTS / "plan_generation" / "STATE.md",
+            output=output,
+            review_output=review_output,
+        )
+    elif test_name == "worker_execution":
+        output = TESTS / "worker_execution" / "output_REPORT.md"
+        review_output = TESTS / "worker_execution" / "review_REPORT.md"
+        prompt = REVIEW_PROMPTS[test_name].format(
+            report_template=templates / "REPORT.template.md",
+            supervisor=SUPERVISOR,
+            output=output,
+            review_output=review_output,
+        )
+    elif test_name == "state_compression":
+        output = TESTS / "state_compression" / "output_STATE_after.md"
+        review_output = TESTS / "state_compression" / "review_STATE.md"
+        prompt = REVIEW_PROMPTS[test_name].format(
+            state_template=templates / "STATE.template.md",
+            supervisor=SUPERVISOR,
+            state_before=TESTS / "state_compression" / "STATE_before.md",
+            report=TESTS / "state_compression" / "REPORT.md",
+            output=output,
+            review_output=review_output,
+        )
+    else:
+        print(f"Unknown test: {test_name}")
+        return
+
+    if not output.exists():
+        print(f"\n--- Skipping review of {test_name}: {output.name} not found ---")
+        return
+
+    print(f"\n--- Reviewing {test_name} with {agent} ---")
+
+    if agent == "claude":
+        cmd = ["claude", "-p", prompt, "--allowedTools", "Read,Write,Bash,Edit"]
+    elif agent == "codex":
+        cmd = ["codex", "exec", "--full-auto", prompt]
+    else:
+        print(f"Unknown agent: {agent}")
+        return
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            print(f"Review agent exited with code {result.returncode}")
+            if result.stderr:
+                print(f"stderr: {result.stderr[:500]}")
+        else:
+            print(f"Review completed → {review_output.name}")
+            # Print the review inline
+            if review_output.exists():
+                print()
+                print(review_output.read_text())
+    except FileNotFoundError:
+        print(f"Agent CLI '{agent}' not found in PATH")
+    except subprocess.TimeoutExpired:
+        print(f"Review agent timed out after 300s")
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -526,6 +734,8 @@ def main():
 
     parser = argparse.ArgumentParser(description="Test the research loop agent")
     parser.add_argument("--run", action="store_true", help="Generate outputs by spawning the agent")
+    parser.add_argument("--review", action="store_true",
+                        help="LLM reviews outputs against templates (checks quality, not just structure)")
     parser.add_argument("--agent", default="claude", help="Agent CLI to use (claude, codex)")
     parser.add_argument("--test", choices=["plan", "worker", "compression", "all"], default="all",
                         help="Which test to run")
@@ -548,6 +758,15 @@ def main():
             run_agent("worker_execution", args.agent)
         if tests_to_run["compression"]:
             run_agent("state_compression", args.agent)
+
+    # LLM review if requested
+    if args.review:
+        if tests_to_run["plan"]:
+            review_agent("plan_generation", args.agent)
+        if tests_to_run["worker"]:
+            review_agent("worker_execution", args.agent)
+        if tests_to_run["compression"]:
+            review_agent("state_compression", args.agent)
 
     # Validate
     results = []

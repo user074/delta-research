@@ -104,7 +104,10 @@ Negative results that clearly reject a hypothesis are as valuable as positive on
 
 ## Testing
 
-`tests/` has sample fixtures and automated validation. See `tests/README.md` for details.
+`tests/` has sample fixtures and automated validation at two levels:
+
+1. **Structural validation** (regex-based) — checks required sections, inline data, table formats, belief updates, frontier changes. Fast, deterministic, runs without an agent.
+2. **LLM review** (`--review`) — spawns the agent to evaluate output quality against the templates. Checks whether the agent followed the rules correctly, flags hallucinations, vagueness, wrong belief targeting, missing context, and other LLM-specific issues. Writes a detailed review with PASS/FAIL per requirement and an overall verdict.
 
 ```bash
 # Generate outputs by spawning the agent, then validate
@@ -115,11 +118,18 @@ python tests/run_tests.py --run --test plan
 python tests/run_tests.py --run --test worker
 python tests/run_tests.py --run --test compression
 
-# Validate existing outputs (after generating manually)
+# Validate existing outputs (no agent needed)
 python tests/run_tests.py
 
+# LLM review — agent evaluates output quality against templates
+python tests/run_tests.py --review
+python tests/run_tests.py --review --test compression
+
+# Generate, review, then validate (full pipeline)
+python tests/run_tests.py --run --review
+
 # Use codex instead of claude
-python tests/run_tests.py --run --agent codex
+python tests/run_tests.py --run --review --agent codex
 ```
 
-The validator checks structural properties: required sections, inline data, visualizations, belief confidence changes, frontier updates, new belief generation. After editing `SUPERVISOR.md`, re-run the tests and compare outputs.
+After editing templates, re-run `--run --review` to regenerate outputs and check whether the agent follows the updated rules.
