@@ -131,7 +131,7 @@ class TestResult:
 # These patterns match the header row of each table, not section headings.
 # This makes parsing robust to different heading styles.
 LEDGER_PATTERN = r"Run\s*\|.*Delta\s*\|.*Signal"
-BELIEF_PATTERN = r"#\s*\|\s*Belief\s*\|.*Confidence"
+BELIEF_PATTERN = r"#\s*\|.*Belief\s*\|.*Confidence"
 FRONTIER_PATTERN = r"Rank\s*\|.*Delta"
 METRICS_PATTERN = r"Metric\s*\|.*Baseline"
 
@@ -356,6 +356,18 @@ def validate_state_compression(
         f"Before: {len(beliefs_before)} beliefs, After: {len(beliefs_after)} beliefs"
     )
 
+    # New beliefs have Parent field populated
+    new_beliefs = beliefs_after[len(beliefs_before):]
+    if new_beliefs:
+        all_have_parent = all(b.get("Parent", "").strip() for b in new_beliefs)
+        r.check(
+            "New beliefs have Parent field",
+            all_have_parent,
+            f"New beliefs: {[b.get('Parent', '') for b in new_beliefs]}"
+        )
+    else:
+        r.check("New beliefs have Parent field", False, "No new beliefs to check")
+
     # Frontier updated — R003's delta removed
     frontier_before = find_table(before, FRONTIER_PATTERN)
     frontier_after = find_table(after, FRONTIER_PATTERN)
@@ -383,6 +395,20 @@ def validate_state_compression(
         len(frontier_after) >= 1,
         f"Frontier has {len(frontier_after)} entries"
     )
+
+    # Frontier entries have scoring dimension columns
+    if frontier_after:
+        sample = frontier_after[0]
+        has_dimensions = all(
+            dim in sample for dim in ("Uncertainty", "Info gain", "Feasibility")
+        )
+        r.check(
+            "Frontier has scoring dimension columns",
+            has_dimensions,
+            f"Frontier columns: {list(sample.keys())}"
+        )
+    else:
+        r.check("Frontier has scoring dimension columns", False, "No frontier entries to check")
 
     # total_runs incremented
     runs_before = extract_meta_field(before, "total_runs")

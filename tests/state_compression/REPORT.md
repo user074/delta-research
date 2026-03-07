@@ -64,8 +64,8 @@ The scaling trend (speedup increases with size) makes sense — Timsort's merge 
 - Using 42.0 as the duplicate value is arbitrary — different values might interact differently with comparison operations (unlikely for floats but not tested)
 
 ## New hypotheses
-- The scaling trend (speedup increases with array size) suggests Timsort's galloping mode has a super-linear benefit with more duplicates — worth investigating whether there's a theoretical bound
-- The nearly-sorted speedup from R001 (3.2x) and duplicate speedup (2.1x) might compound — what happens with data that's BOTH nearly-sorted AND has many duplicates? Real-world data often has both properties.
+- The scaling trend (speedup increases with array size) suggests Timsort's galloping mode has a super-linear benefit with more duplicates — worth investigating whether there's a theoretical bound [parent: #3]
+- The nearly-sorted speedup from R001 (3.2x) and duplicate speedup (2.1x) might compound — what happens with data that's BOTH nearly-sorted AND has many duplicates? Real-world data often has both properties. [parent: —]
 
 ## Next tests
 1. Test combined effect: nearly-sorted + high-duplicate data. If speedups compound (>4x), it would explain why Timsort dominates on real-world benchmarks.

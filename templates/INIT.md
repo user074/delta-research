@@ -69,6 +69,7 @@ The file should contain:
   - Key constraints (from interview)
   - Pointer: `See delta-research/templates/SUPERVISOR.md for the loop spec`
   - Pointer: `Current state (beliefs, what's been tried, frontier) lives in STATE.md`
+  - Pointer: Human-readable summary lives in SYNTHESIS.md
   - How to run: `To continue research, say: "run the research loop"`
 
 For Codex, also enable multi-agent in config:
@@ -88,7 +89,8 @@ Spawn an environment agent to handle setup. This is separate from the research l
 
 The environment agent should:
 - Detect active conda/venv, confirm with human
-- Check GPU availability if relevant (`nvidia-smi`). Ask how many GPUs to use and how to maximize utilization (e.g. CUDA_VISIBLE_DEVICES, DataParallel vs DistributedDataParallel)
+- Check GPU availability if relevant (`nvidia-smi`). Record all available GPUs and set `CUDA_VISIBLE_DEVICES` to use all of them by default. Note the parallelism strategy (DataParallel, DistributedDataParallel, or independent runs per GPU).
+- Check CPU cores (`nproc` / `sysctl -n hw.ncpu`) and record in Environment. Workers use this to set parallelism (e.g. num_workers, joblib n_jobs).
 - Verify key dependencies are importable
 - Install missing packages within the env
 
@@ -149,7 +151,7 @@ Ask the human which permission level they want before writing the config. Show t
 ## Step 4: Create project structure
 
 ```
-mkdir -p REPORTS RUNS ARTIFACTS
+mkdir -p REPORTS RUNS
 ```
 
 ---
@@ -162,6 +164,8 @@ Use `templates/STATE.template.md` as structure. Fill in from the interview:
 - Initial frontier: deltas that would discriminate between competing hypotheses
 - Policy: budget, interrupt thresholds
 - Environment section populated by environment agent
+
+Also create initial SYNTHESIS.md from templates/SYNTHESIS.template.md with project name, goal, and seed beliefs.
 
 ---
 

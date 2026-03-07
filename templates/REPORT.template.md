@@ -37,8 +37,8 @@
 - (what else could explain the result?)
 
 ## New hypotheses
-<!-- Did this run reveal something that suggests a NEW belief to track? -->
-- (new hypothesis, if any, with reasoning)
+<!-- NEW belief to track? Include parent belief # if it depends on an existing one. -->
+- (new hypothesis, with reasoning) [parent: #N or —]
 
 ## Next tests
 1. (delta + why it would discriminate)

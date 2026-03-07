@@ -7,6 +7,7 @@
 - **last_updated**: (date)
 - **total_runs**: 0
 - **status**: active
+- **paradigm**: v1
 
 ---
 
@@ -16,7 +17,8 @@
 - **conda/venv**: (activation command, e.g. `conda activate myenv`)
 - **python**: (version)
 - **key packages**: (package versions that matter for reproducibility)
-- **gpu**: (GPU setup, e.g. `CUDA_VISIBLE_DEVICES=0,1`, or "N/A")
+- **gpu**: (GPU setup, e.g. `CUDA_VISIBLE_DEVICES=0,1,2,3`, or "N/A")
+- **cpu**: (CPU model and core count, e.g. "AMD Ryzen 9 5900X, 12 cores")
 - **checkpoints**: (paths to model checkpoints)
 - **datasets**: (paths to datasets)
 - **working dir**: (project root path)
@@ -25,11 +27,12 @@
 
 ## BeliefState
 <!-- Confidence is 0–1. Beliefs nearest 0.5 are highest priority to test. -->
-<!-- Status: supported (≥0.8) | rejected (≤0.2) | conflicting | active -->
+<!-- Status: supported (≥0.8) | rejected (≤0.2) | conflicting | active | needs-review -->
+<!-- Parent: belief # this depends on, or — for root beliefs. Multi-parent rare; note in evidence. -->
 
-| # | Belief | Status | Confidence | Key evidence | Last updated |
-|---|--------|--------|------------|--------------|--------------|
-| 1 | (seed belief) | active | 0.5 | seed | (date) |
+| # | Parent | Belief | Status | Confidence | Key evidence | Last updated |
+|---|--------|--------|--------|------------|--------------|--------------|
+| 1 | — | (seed belief) | active | 0.5 | seed | (date) |
 
 ## Ledger
 <!-- Append-only. One row per run. This is the canonical history. -->
@@ -39,11 +42,12 @@
 
 ## Frontier
 <!-- Ranked deltas. Each targets a specific uncertain belief. -->
-<!-- Pick the one most likely to discriminate: clear supports OR contradicts. -->
+<!-- Dimensions: Uncertainty (of target belief), Info gain (expected discrimination), Feasibility (cost/risk). -->
+<!-- Values: high | med | low. Supervisor uses judgment to rank; dimensions are for auditability. -->
 
-| Rank | Delta | Target | Rationale | Blocked by |
-|------|-------|--------|-----------|------------|
-| 1 | (first experiment) | #1 | (why this would discriminate) | — |
+| Rank | Delta | Target | Uncertainty | Info gain | Feasibility | Rationale | Blocked by |
+|------|-------|--------|-------------|-----------|-------------|-----------|------------|
+| 1 | (first experiment) | #1 | high | high | high | (why this would discriminate) | — |
 
 ## Policy
 

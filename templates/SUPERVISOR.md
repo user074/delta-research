@@ -14,7 +14,7 @@
 2. **Bisect the hypothesis space** — A good delta splits uncertain beliefs in two. Even negative results are progress if they eliminate a direction.
 3. **Compression over narration** — STATE.md holds structured tables, not prose. Compress after every run.
 4. **Autonomy with crisp interrupts** — Default is *keep going*. Stop only on defined boundaries.
-5. **Single source of truth** — STATE.md is memory. Reports are the detailed record. Everything else is derived.
+5. **Single source of truth** — STATE.md is memory. Reports are the detailed record. SYNTHESIS.md is the human-facing interpretation. Everything else is derived.
 
 ---
 
@@ -43,11 +43,13 @@ Next run ID = highest Ledger run + 1 (or R001 if empty).
 
 Pick the top-ranked non-blocked Frontier entry.
 
-**Bandit reasoning** — use the Ledger to learn what works:
-1. Which beliefs are most uncertain? (confidence nearest 0.5 = highest value to test)
-2. For each candidate delta: would the result clearly push a belief toward supported or rejected? Or would it likely produce an ambiguous result?
-3. Check history: have similar deltas produced discriminating results? Have we tried this direction and gotten only null?
-4. Pick the delta with the highest expected discrimination for the most uncertain belief.
+**Bandit reasoning** — for each candidate delta, assess three dimensions:
+
+1. **Uncertainty** (of the target belief): Confidence nearest 0.5 = `high`. 0.3-0.4 or 0.6-0.7 = `med`. Near supported/rejected = `low`.
+2. **Info gain** (expected discrimination): Would the result clearly push the belief? Check history for similar deltas. High discrimination potential = `high`.
+3. **Feasibility**: Quick and straightforward = `high`. Expensive or has failed approaches = `low`.
+
+Record all three in the Frontier table. Use judgment to rank — dimensions make reasoning auditable but don't combine into a formula. Prioritize high-uncertainty + high-info-gain, downrank low-feasibility.
 
 If Frontier is empty, regenerate:
 - Find beliefs with confidence 0.3–0.7 (active, uncertain)
@@ -72,6 +74,11 @@ Write `RUNS/R###/PLAN.md` using `templates/PLAN.template.md` as structure.
 - Target **multiple related beliefs** when a single analysis can inform several
 - Define **clear success criteria** — what result would support vs contradict, with thresholds
 - Specify **exact resources** — checkpoint paths, dataset locations, which artifacts from prior runs to use. No ambiguity.
+- **Maximize hardware utilization** — check Environment for available GPUs, CPU cores, and RAM. Design commands that use all available hardware to minimize wall-clock time:
+  - If multiple GPUs are available, use all of them (DataParallel, DistributedDataParallel, multi-GPU batch processing, or parallel independent runs across GPUs)
+  - If a computation can run on GPU (matrix ops, model inference, large numerical work), use GPU — don't default to CPU
+  - For CPU-bound work, use multiprocessing/joblib/concurrent.futures to saturate available cores
+  - Specify device placement and parallelism explicitly in the plan commands — don't leave it to the worker to figure out
 
 Fill in:
 - Delta: what to change, why, what belief(s) it targets
@@ -120,6 +127,8 @@ Update STATE.md (see Section 5 for rules):
 - Update BeliefState confidence and status based on the evidence
 - Add new beliefs from report
 - Update Frontier: remove completed delta, consider adding suggested next deltas
+- Check for paradigm shift (Section 5): if any belief was rejected or dropped ≥0.3, cascade to children
+- **Update SYNTHESIS.md** if: (1) paradigm shift this cycle, (2) a belief reached supported/rejected, or (3) 5+ runs since last update. If SYNTHESIS.md doesn't exist, create from template. Write for a human who hasn't followed the loop.
 - Update Meta (run count, date)
 
 ### Phase 7: Check interrupts
@@ -150,6 +159,12 @@ If clear → return to Phase 1.
 - **Must be human-readable** — a researcher should understand what happened by reading just the report
 - All data inline — numbers, tables, key outputs in the report itself, not just pointers to JSON files
 - Visualizations embedded with `![description](path)` — generate plots for any numerical results
+
+### SYNTHESIS.md
+- **Owner**: Supervisor
+- **Worker**: no access
+- Updated after paradigm shifts, belief resolutions, or every 5 runs
+- Human-facing — readable without STATE.md context
 
 ### Supervisor NEVER
 - Parses raw logs or debugs mid-run
@@ -195,6 +210,14 @@ If a package is missing, install it within the env (`pip install <pkg>`).
 - ONLY use resources specified in the plan (checkpoints, datasets, artifacts). If a resource is missing or wrong, BLOCKER.
 - If any stop condition triggers, immediately report verdict = BLOCKER
 - Null results are valuable — report honestly
+
+## Hardware utilization
+
+Minimize experiment wall-clock time by maximizing hardware use:
+- Use ALL available GPUs listed in Environment (not just cuda:0). Use DataParallel, DistributedDataParallel, or run independent sub-tasks across GPUs.
+- If a computation can benefit from GPU acceleration (matrix ops, model inference, large array operations), use GPU.
+- For CPU-bound work, parallelize across all available cores (multiprocessing, joblib, concurrent.futures).
+- The plan specifies device placement — follow it. If unspecified, default to using all available hardware.
 
 ## Execution
 
@@ -288,6 +311,8 @@ Append one row:
 ```
 
 ### BeliefState — update existing
+If the BeliefState table lacks a Parent column, treat all beliefs as root. Add the column on the next compression.
+
 Read the report's verdict and evidence. Judge:
 - **supports + discriminating**: meaningful increase in confidence
 - **supports + partial**: small increase
@@ -316,8 +341,25 @@ The belief space should grow as you learn, not just shrink. If all beliefs are r
 - Remove the completed delta
 - **Add deltas targeting new beliefs** — every new belief should have at least one candidate delta
 - Review the report's "Next tests" — add any that would discriminate on uncertain beliefs
-- Re-rank: prioritize deltas targeting the most uncertain beliefs (nearest 0.5)
+- Re-rank: assess Uncertainty, Info gain, Feasibility for each delta. Prioritize high-uncertainty targets with high info-gain.
+- If Frontier lacks scoring dimension columns, add them on next compression.
 - For beliefs that have accumulated multiple null results: consider whether the belief is testable, or needs reformulation
+
+### Paradigm shift detection
+
+After updating beliefs and before updating Frontier, check for cascading impact:
+
+1. **Trigger**: A belief is rejected (confidence ≤ 0.2) OR confidence drops ≥ 0.3 in a single update.
+
+2. **Cascade**: Find all beliefs whose Parent references the affected belief. Set status to `needs-review`. Cascade recursively — if a child is itself a parent, flag its children too. Do NOT change children's confidence — that requires re-evaluation.
+
+3. **Severity**:
+   - **Minor** (no cascade): confidence adjustment, no children affected. No paradigm bump.
+   - **Major** (cascade triggered): increment `paradigm` in Meta (v1 → v2). Add to Scratch: `--- Paradigm v2 (date) --- Belief #N rejected. Children #X, #Y flagged. Reason: <summary>.`
+
+4. **On major update**: For each `needs-review` child, add a frontier entry to re-evaluate it. The delta should test whether the child still holds given the parent's new status.
+
+5. **Resolution**: `needs-review` → `active` (with updated confidence) once a run explicitly re-evaluates it. If no new evidence, supervisor may adjust confidence down 0.1-0.2 noting "indirect adjustment" in evidence.
 
 ### Meta
 - Increment `total_runs`
