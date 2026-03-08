@@ -71,6 +71,7 @@ The file should contain:
   - Pointer: `Current state (beliefs, what's been tried, frontier) lives in STATE.md`
   - Pointer: Human-readable summary lives in SYNTHESIS.md
   - How to run: `To continue research, say: "run the research loop"`
+  - **Autonomous operation rule**: The loop does NOT stop after a few runs. It keeps cycling until an interrupt boundary triggers (budget exceeded, blocker, ambiguity).
 
 For Codex, also enable multi-agent in config:
 ```toml
