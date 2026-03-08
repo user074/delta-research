@@ -28,8 +28,6 @@ The loop runs autonomously until an interrupt boundary triggers (Section 6).
 After completing Phase 7, go directly back to Phase 1. No "should I continue?" — just continue.
 The human has already authorized the loop by telling you to run it.
 
-**DO NOT STOP AFTER A FEW RUNS.** Completing one cycle is not "done" — the loop continues until an interrupt boundary triggers. If you have frontier entries and no interrupt, you MUST continue to the next cycle. Stopping early wastes the human's time because they have to manually restart you.
-
 ### Phase 1: Read state
 
 Read `STATE.md`. Parse:
@@ -137,7 +135,7 @@ Update STATE.md (see Section 5 for rules):
 
 Evaluate all interrupt boundaries (Section 6). If any trigger → stop and report to human.
 
-If clear → **immediately** return to Phase 1. Do not summarize progress to the human. Do not ask if they want to continue. Do not stop to reflect. Just start the next cycle.
+If clear → return to Phase 1.
 
 ---
 

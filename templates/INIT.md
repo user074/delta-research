@@ -82,6 +82,21 @@ multi_agent = true
 description = "Research worker: executes a single experiment plan, writes a structured report. Never modifies STATE.md or PLAN.md."
 ```
 
+For Codex, also add this section to `AGENTS.md` to prevent premature turn-ending:
+
+```markdown
+## Autonomous loop behavior (Codex-specific)
+
+Codex has a default behavior of surfacing progress to the user and closing the turn cleanly after completing work. In the research loop, this is wrong — emitting a user-facing summary between cycles causes Codex to treat it as a turn completion point and stop.
+
+Rules for the research loop:
+- Do NOT emit user-facing progress messages between cycles. No "here's what I found so far." No "completed R003, ready for next pass."
+- Do NOT treat "substantial progress" as a reason to yield control. The interrupt boundaries in STATE.md Policy are the ONLY valid reasons to stop.
+- "Keep experiments short" means each experiment is fast to execute. It does NOT mean "run one cycle and stop." Short experiments = more cycles per session, not fewer.
+- After updating STATE.md (Phase 7), go directly back to reading STATE.md (Phase 1). Do not produce any output between these steps.
+- The only time you talk to the human is when an interrupt boundary fires.
+```
+
 ---
 
 ## Step 2: Environment setup
