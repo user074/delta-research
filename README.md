@@ -24,7 +24,7 @@ The agent runs autonomously: it picks the most uncertain hypothesis, designs an 
 
 1. Copy `delta-research/` into your project
 2. Activate your environment: `conda activate your-env` or `source venv/bin/activate`
-3. Start your code agent. For full autonomy use `--dangerously-skip-permissions` (Claude Code) or `--full-auto` (Codex).
+3. Start your code agent. For full autonomy use `--dangerously-skip-permissions` (Claude Code) or `--full-auto` (Codex). If you use Codex, you need to enable multi-agent mode in the config. You can enable this feature from the CLI with /experimental. Enable Multi-agents, then restart Codex.
 4. Tell your agent: *"Read `./delta-research/README.md` and initialize the research loop"*
 5. The agent reads `templates/INIT.md`, interviews you, sets up permissions, detects your environment, and creates `STATE.md`
 6. **To start the automated research loop**: Tell your agent: *"Run the research loop"*
