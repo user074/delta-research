@@ -36,6 +36,7 @@ Read `STATE.md`. Parse:
 - **Frontier**: ranked candidate deltas
 - **Policy**: interrupt boundaries
 - **Environment**: conda, paths, resources (pass to worker)
+- **INFRA.md** (if exists): hardware profile, optimization playbook, storage topology (pass relevant sections to worker)
 
 Next run ID = highest Ledger run + 1 (or R001 if empty).
 
@@ -74,11 +75,14 @@ Write `RUNS/R###/PLAN.md` using `templates/PLAN.template.md` as structure.
 - Target **multiple related beliefs** when a single analysis can inform several
 - Define **clear success criteria** — what result would support vs contradict, with thresholds
 - Specify **exact resources** — checkpoint paths, dataset locations, which artifacts from prior runs to use. No ambiguity.
-- **Maximize hardware utilization** — check Environment for available GPUs, CPU cores, and RAM. Design commands that use all available hardware to minimize wall-clock time:
-  - If multiple GPUs are available, use all of them (DataParallel, DistributedDataParallel, multi-GPU batch processing, or parallel independent runs across GPUs)
-  - If a computation can run on GPU (matrix ops, model inference, large numerical work), use GPU — don't default to CPU
-  - For CPU-bound work, use multiprocessing/joblib/concurrent.futures to saturate available cores
-  - Specify device placement and parallelism explicitly in the plan commands — don't leave it to the worker to figure out
+- **Maximize hardware utilization** — read INFRA.md (if it exists) for the hardware profile and optimization playbook. Use it to design commands that fully utilize available hardware:
+  - **Parallelism**: use the strategy from INFRA.md Playbook → Parallelism (DDP, FSDP, etc.) and include the exact launch command in plan steps
+  - **Precision**: use the recommended dtype from INFRA.md Playbook → Precision (BF16, FP16, FP32) — specify explicitly in plan commands
+  - **Attention**: if Flash Attention or SDPA is available (check INFRA.md Playbook → Attention), specify it in the plan
+  - **Storage**: use paths from INFRA.md Storage → Guidance (fast scratch for checkpoints, large storage for data reads)
+  - **CPU-bound work**: parallelize across all cores (see INFRA.md Compute → CPU for core count)
+  - Specify device placement and parallelism explicitly in plan commands — don't leave it to the worker to figure out
+  - If INFRA.md doesn't exist, fall back to STATE.md Environment for basic GPU/CPU info
 
 Fill in:
 - Delta: what to change, why, what belief(s) it targets
@@ -95,7 +99,7 @@ The plan is **immutable** once handed to the worker. If it needs to change, the 
 Assemble the worker prompt (see Section 4) with the plan content and spawn a worker.
 
 **Agent-specific spawning:**
-- **Claude Code**: `Task(subagent_type="general-purpose", prompt=<worker prompt>)`
+- **Claude Code**: `Task(subagent_type="general-purpose", model="sonnet",prompt=<worker prompt>)`
 - **Codex**: Spawn a sub-agent with the worker prompt. Codex handles orchestration natively — it spawns the thread, waits for results, and surfaces the output. The sub-agent runs in the same sandbox with the same file access. Instruct it to read the PLAN, execute, and write the REPORT.
 - **Other agents**: Execute the worker prompt directly. Follow the same contract — execute the plan, write the report, don't touch STATE.md.
 
@@ -147,6 +151,12 @@ If clear → return to Phase 1.
 - **Environment section**: managed by environment agent, read by workers
 - Updated after every run
 
+### INFRA.md
+- **Owner**: Environment agent (created during init, updated on hardware changes)
+- **Supervisor**: read-only (extracts playbook for worker prompts and plan creation)
+- **Worker**: read-only (follows playbook for precision, parallelism, storage)
+- Re-run environment agent to update after hardware changes (new GPUs, moved to cluster, etc.)
+
 ### PLAN.md (per run)
 - **Owner**: Supervisor creates, Worker reads
 - **Immutable** during execution
@@ -184,8 +194,9 @@ If clear → return to Phase 1.
 
 ## 4. Worker Prompt Template
 
-> Supervisor fills `{PLAN_CONTENT}`, `{RUN_ID}`, and `{ENV_SETUP}` before spawning.
+> Supervisor fills `{PLAN_CONTENT}`, `{RUN_ID}`, `{ENV_SETUP}`, and `{INFRA_PLAYBOOK}` before spawning.
 > `{ENV_SETUP}` comes from the Environment section of STATE.md.
+> `{INFRA_PLAYBOOK}` comes from INFRA.md (Optimization Playbook + Storage Guidance + GPU table). If INFRA.md doesn't exist, omit the Hardware & Optimization section entirely.
 
 ```
 You are a research Worker executing a single experiment run.
@@ -197,6 +208,10 @@ Before running any commands, activate the project environment:
 
 Verify the environment is correct before proceeding (e.g. `which python`, quick import check).
 If a package is missing, install it within the env (`pip install <pkg>`).
+
+## Hardware & Optimization
+
+{INFRA_PLAYBOOK}
 
 ## Your plan
 
@@ -213,11 +228,14 @@ If a package is missing, install it within the env (`pip install <pkg>`).
 
 ## Hardware utilization
 
-Minimize experiment wall-clock time by maximizing hardware use:
-- Use ALL available GPUs listed in Environment (not just cuda:0). Use DataParallel, DistributedDataParallel, or run independent sub-tasks across GPUs.
-- If a computation can benefit from GPU acceleration (matrix ops, model inference, large array operations), use GPU.
-- For CPU-bound work, parallelize across all available cores (multiprocessing, joblib, concurrent.futures).
-- The plan specifies device placement — follow it. If unspecified, default to using all available hardware.
+Follow the Hardware & Optimization playbook above. Specifically:
+- **Precision**: use the recommended dtype. Wrap training/inference in the recommended autocast context.
+- **Attention**: use the recommended attention mechanism (Flash Attention, SDPA, or standard).
+- **Parallelism**: use the recommended strategy and launch command. If the plan specifies DDP, use `torchrun` as shown.
+- **Storage**: write checkpoints and large intermediates to the fast scratch path. Read data from the dataset path.
+- For CPU-bound work, parallelize across all available cores.
+- The plan specifies device placement — follow it. If unspecified, use the playbook defaults.
+- If no Hardware & Optimization section is provided, use all available GPUs and default to FP32.
 
 ## Execution
 

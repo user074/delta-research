@@ -3,9 +3,10 @@
 Automated tests for the research loop agent.
 
 Validates that the agent produces correct outputs at each stage:
-  1. Plan generation: STATE.md → PLAN.md
-  2. Worker execution: PLAN.md → REPORT.md
-  3. State compression: STATE.md + REPORT.md → updated STATE.md
+  1. Initialization: SYSTEM_PROFILE.md → INFRA.md
+  2. Plan generation: STATE.md → PLAN.md
+  3. Worker execution: PLAN.md → REPORT.md
+  4. State compression: STATE.md + REPORT.md → updated STATE.md
 
 Usage:
   python tests/run_tests.py                    # validate existing outputs
@@ -135,6 +136,255 @@ LEDGER_PATTERN = r"Run\s*\|.*Delta\s*\|.*Signal"
 BELIEF_PATTERN = r"#\s*\|.*Belief\s*\|.*Confidence"
 FRONTIER_PATTERN = r"Rank\s*\|.*Delta"
 METRICS_PATTERN = r"Metric\s*\|.*Baseline"
+GPU_TABLE_PATTERN = r"Index\s*\|.*Model\s*\|.*VRAM"
+ACCELERATOR_PATTERN = r"Package\s*\|.*Version"
+
+
+# ---------------------------------------------------------------------------
+# Test 0: Initialization (INFRA.md generation)
+# ---------------------------------------------------------------------------
+
+def validate_infra(infra_path: Path, profile_path: Path) -> TestResult:
+    r = TestResult("Initialization (INFRA)")
+
+    if not infra_path.exists():
+        r.check("Output file exists", False, f"Not found: {infra_path}")
+        return r
+    r.check("Output file exists", True)
+
+    infra = infra_path.read_text()
+    sections = extract_sections(infra)
+    section_names_lower = {s.lower() for s in sections.keys()}
+
+    # --- Required sections ---
+    for required in ["GPUs", "CPU", "Memory", "Precision", "Attention", "Compilation",
+                      "Parallelism", "Data Loading", "GPU-CPU Transfer Pitfalls",
+                      "Training Efficiency", "Installed Accelerators", "Paths",
+                      "Profiling Source"]:
+        found = any(required.lower() in s for s in section_names_lower)
+        r.check(f"Has section: {required}", found)
+
+    # --- GPU table has rows matching the profile (4x A100) ---
+    gpu_table = find_table(infra, GPU_TABLE_PATTERN)
+    r.check(
+        "GPU table has rows",
+        len(gpu_table) >= 1,
+        f"Found {len(gpu_table)} GPU rows"
+    )
+
+    # GPU table mentions A100
+    gpu_text = " ".join(str(row) for row in gpu_table)
+    r.check(
+        "GPU table identifies A100",
+        "A100" in gpu_text or "a100" in gpu_text.lower(),
+        "Profile has 4x A100 — table should reflect this"
+    )
+
+    # --- Precision: should recommend BF16 for A100 (cc 8.0) ---
+    precision_text = ""
+    for key, val in sections.items():
+        if "precision" in key.lower():
+            precision_text = val.lower()
+    r.check(
+        "Precision recommends BF16",
+        "bf16" in precision_text or "bfloat16" in precision_text,
+        "A100 (cc 8.0) should use BF16"
+    )
+
+    # Should NOT recommend FP16 as primary (FP16 is for V100/T4)
+    # Allow mentioning FP16 in passing, but "recommended" should be BF16
+    rec_match = re.search(r"\*\*recommended\*\*:\s*(.+)", infra, re.IGNORECASE)
+    if rec_match:
+        rec_val = rec_match.group(1).lower()
+        r.check(
+            "Precision primary recommendation is not FP16",
+            "fp16" not in rec_val,
+            f"Got: {rec_val} — should be BF16 for A100"
+        )
+    else:
+        r.check("Precision primary recommendation is not FP16", True, "No explicit recommendation field found — checked in section text")
+
+    # --- Attention: flash-attn NOT installed, should recommend SDPA and note flash-attn opportunity ---
+    attention_text = ""
+    for key, val in sections.items():
+        if "attention" in key.lower() and "flash" not in key.lower().replace("attention", ""):
+            attention_text = val.lower()
+    r.check(
+        "Attention recommends SDPA (flash-attn not installed)",
+        "sdpa" in attention_text or "scaled_dot_product" in attention_text,
+        "flash-attn not installed — should recommend SDPA as current mechanism"
+    )
+
+    # Should mention flash-attn as upgrade opportunity
+    r.check(
+        "Attention notes flash-attn upgrade opportunity",
+        "flash" in attention_text and ("install" in attention_text or "not installed" in attention_text or "upgrade" in attention_text),
+        "cc 8.0 supports FA2 but flash-attn not installed — should note this"
+    )
+
+    # --- Compilation: mentions torch.compile ---
+    compilation_text = ""
+    for key, val in sections.items():
+        if "compil" in key.lower():
+            compilation_text = val.lower()
+    r.check(
+        "Compilation mentions torch.compile",
+        "torch.compile" in compilation_text or "compile" in compilation_text,
+        "PyTorch 2.4 available — should mention torch.compile"
+    )
+
+    # --- Parallelism: should recommend DDP for 4 GPUs ---
+    parallelism_text = ""
+    for key, val in sections.items():
+        if "parallelism" in key.lower():
+            parallelism_text = val.lower()
+    r.check(
+        "Parallelism recommends DDP",
+        "ddp" in parallelism_text or "distributeddataparallel" in parallelism_text,
+        "4 GPUs with NVLink — should recommend DDP"
+    )
+
+    # Should include torchrun launch command
+    r.check(
+        "Parallelism includes torchrun command",
+        "torchrun" in parallelism_text,
+        "DDP should specify torchrun launch command"
+    )
+
+    # --- Data Loading section has key fields ---
+    data_loading_text = ""
+    for key, val in sections.items():
+        if "data loading" in key.lower():
+            data_loading_text = val.lower()
+    dl_keywords = ["pin_memory", "num_workers", "prefetch"]
+    found_dl = [kw for kw in dl_keywords if kw in data_loading_text]
+    r.check(
+        "Data Loading has key fields",
+        len(found_dl) >= 2,
+        f"Found: {found_dl}, expected at least 2 of {dl_keywords}"
+    )
+
+    # --- GPU-CPU Transfer Pitfalls mentions .item() ---
+    transfer_text = ""
+    for key, val in sections.items():
+        if "transfer" in key.lower() or "pitfall" in key.lower():
+            transfer_text = val
+    r.check(
+        "GPU-CPU pitfalls mentions .item()",
+        ".item()" in transfer_text,
+        "Should warn against .item() in training loops"
+    )
+
+    # --- Training Efficiency section has content ---
+    efficiency_text = ""
+    for key, val in sections.items():
+        if "training efficiency" in key.lower() or "efficiency" in key.lower():
+            efficiency_text = val.lower()
+    r.check(
+        "Training Efficiency has fused optimizer guidance",
+        "fused" in efficiency_text,
+        "PyTorch 2.4 supports fused AdamW — should mention it"
+    )
+
+    # --- Installed Accelerators table ---
+    accel_table = find_table(infra, ACCELERATOR_PATTERN)
+    r.check(
+        "Installed Accelerators table has rows",
+        len(accel_table) >= 4,
+        f"Found {len(accel_table)} rows (profile has 8+ packages)"
+    )
+
+    # flash-attn should show "not installed" (matching the profile)
+    flash_row = [row for row in accel_table if "flash" in str(row).lower()]
+    if flash_row:
+        flash_ver = str(flash_row[0]).lower()
+        r.check(
+            "Accelerators: flash-attn correctly shows not installed",
+            "not installed" in flash_ver,
+            f"Profile has flash-attn not installed — should reflect this"
+        )
+    else:
+        r.check("Accelerators: flash-attn correctly shows not installed", False, "flash-attn row not found")
+
+    # deepspeed should show its version (it IS installed)
+    ds_row = [row for row in accel_table if "deepspeed" in str(row).lower()]
+    if ds_row:
+        ds_ver = str(ds_row[0]).lower()
+        r.check(
+            "Accelerators: deepspeed shows installed version",
+            "not installed" not in ds_ver and "0.14" in ds_ver,
+            f"Profile has deepspeed 0.14.0 — should show version"
+        )
+    else:
+        r.check("Accelerators: deepspeed shows installed version", False, "deepspeed row not found")
+
+    # --- Storage paths table ---
+    storage_table = find_table(infra, r"Purpose\s*\|.*Path")
+    r.check(
+        "Storage paths table has rows",
+        len(storage_table) >= 2,
+        f"Found {len(storage_table)} storage path rows"
+    )
+
+    # Should identify NFS for /data
+    storage_text = " ".join(str(row) for row in storage_table)
+    r.check(
+        "Storage identifies NFS mount",
+        "nfs" in storage_text.lower() or "network" in storage_text.lower(),
+        "/data is NFS-mounted — should be identified"
+    )
+
+    # --- Profiling source ---
+    profiling_text = ""
+    for key, val in sections.items():
+        if "profiling" in key.lower() and "source" in key.lower():
+            profiling_text = val.lower()
+    r.check(
+        "Profiling Source section is filled",
+        len(profiling_text.strip()) > 20,
+        "Should record method, date, and host"
+    )
+
+    # --- Recommended Optimizations ---
+    has_rec_section = any("recommend" in s and "optim" in s for s in section_names_lower)
+    r.check("Has section: Recommended Optimizations", has_rec_section)
+
+    # Should have an optimization table with rows
+    opt_table = find_table(infra, r"#\s*\|.*Optimization\s*\|.*Command")
+    r.check(
+        "Recommended Optimizations table has rows",
+        len(opt_table) >= 1,
+        f"Found {len(opt_table)} optimization rows (profile has flash-attn and triton missing)"
+    )
+
+    # Should recommend installing flash-attn (cc 8.0 but not installed)
+    opt_text = " ".join(str(row) for row in opt_table).lower()
+    r.check(
+        "Recommends installing flash-attn",
+        "flash" in opt_text,
+        "A100 (cc 8.0) supports FA2 but flash-attn not installed — should recommend it"
+    )
+
+    # Should recommend installing triton (torch.compile available but triton missing)
+    r.check(
+        "Recommends installing triton",
+        "triton" in opt_text,
+        "torch.compile available but triton not installed — should recommend it"
+    )
+
+    # Each recommendation should have a command
+    if opt_table:
+        has_commands = all(
+            row.get("Command", "").strip()
+            for row in opt_table
+        )
+        r.check(
+            "Each recommendation has a concrete command",
+            has_commands,
+            "Recommendations should include runnable commands (pip install, etc.)"
+        )
+
+    return r
 
 
 # ---------------------------------------------------------------------------
@@ -440,6 +690,43 @@ def validate_state_compression(
 # ---------------------------------------------------------------------------
 
 REVIEW_PROMPTS = {
+    "initialization": (
+        "You are a quality reviewer for an LLM-driven research loop. "
+        "Your job is to evaluate whether the generated INFRA.md follows the template and correctly "
+        "derives the optimization playbook from the hardware profile.\n\n"
+        "Read these files:\n"
+        "1. The INFRA template: {infra_template}\n"
+        "2. The system profile (simulated hardware info): {profile}\n"
+        "3. The generated output: {output}\n\n"
+        "The system profile describes a 4x A100-80GB server with NVLink, AMD EPYC 64-core CPU, "
+        "504GB RAM, PyTorch 2.4, deepspeed, and other packages. flash-attn and triton are NOT "
+        "installed — these are optimization gaps the agent should identify.\n\n"
+        "Evaluate the output against the template and hardware. Report:\n\n"
+        "## Compliance\n"
+        "For each requirement below, say PASS or FAIL with a one-line reason:\n"
+        "- All template sections present (Compute/GPUs/CPU/Memory, full Optimization Playbook, Storage, Profiling Source)\n"
+        "- GPU table correctly reflects 4x A100-SXM4-80GB with cc 8.0\n"
+        "- Precision correctly recommends BF16 (not FP16) for cc 8.0\n"
+        "- Attention correctly recommends SDPA (flash-attn not installed) and notes FA2 as upgrade opportunity\n"
+        "- Compilation mentions torch.compile with appropriate mode recommendations\n"
+        "- Parallelism recommends DDP with torchrun for 4 GPUs, mentions FSDP as fallback for large models\n"
+        "- Data Loading has concrete num_workers, pin_memory, prefetch_factor guidance\n"
+        "- GPU-CPU Transfer Pitfalls includes .item() warning and accumulate-on-GPU pattern\n"
+        "- Training Efficiency mentions fused AdamW, TF32, cudnn.benchmark\n"
+        "- Installed Accelerators table has correct versions from the profile (flash-attn and triton show 'not installed')\n"
+        "- Storage correctly identifies /scratch as fast-local and /data as NFS\n"
+        "- Recommended Optimizations table identifies flash-attn and triton as gaps with pip install commands\n"
+        "- Playbook recommendations are internally consistent (no contradictions)\n\n"
+        "## Quality issues\n"
+        "List any problems — wrong recommendations for the hardware, hallucinated package versions, "
+        "missing optimizations that should be obvious for A100s, generic advice that isn't tailored "
+        "to the specific hardware.\n\n"
+        "## What's good\n"
+        "Note anything the output does particularly well.\n\n"
+        "## Verdict\n"
+        "Overall: SATISFACTORY or NEEDS IMPROVEMENT, with a 1-2 sentence summary.\n\n"
+        "Write your review to {review_output}. Do NOT modify any other files."
+    ),
     "plan_generation": (
         "You are a quality reviewer for an LLM-driven research loop. "
         "Your job is to evaluate whether the generated plan follows the templates and rules.\n\n"
@@ -541,6 +828,35 @@ REVIEW_PROMPTS = {
 
 
 PROMPTS = {
+    "initialization": (
+        "You are an environment setup agent for a research loop.\n\n"
+        "Read the INFRA template at {infra_template} — your output MUST use this exact structure "
+        "with all the sections defined in the template.\n\n"
+        "Read the INIT procedure at {init} — focus on the 'Hardware profiling and INFRA.md' "
+        "subsection in Step 2 for the playbook derivation rules.\n\n"
+        "Read the system profile at {profile}. This contains the output of hardware profiling "
+        "commands (nvidia-smi, lscpu, free, df, python package versions) for a real server.\n\n"
+        "Your task: Generate INFRA.md by:\n"
+        "1. Filling the Compute section from the profiling output (GPU table, CPU, Memory)\n"
+        "2. Deriving the Optimization Playbook using the rules in INIT.md — precision, attention, "
+        "compilation, parallelism, data loading, GPU-CPU pitfalls, training efficiency, inference\n"
+        "3. Filling Storage paths from the df/mount output, identifying speed classes correctly\n"
+        "4. Filling the Installed Accelerators table from the package versions\n"
+        "5. Filling Profiling Source (method: auto-profiled, today's date, hostname from profile)\n\n"
+        "IMPORTANT: The playbook must be specific to this hardware. For example:\n"
+        "- A100 (cc 8.0) → BF16, not FP16\n"
+        "- flash-attn NOT installed but cc 8.0 supports it → recommend SDPA now, note flash-attn as upgrade\n"
+        "- 4 GPUs with NVLink → DDP with torchrun, FSDP for large models\n"
+        "- PyTorch 2.4 → torch.compile available, but triton NOT installed → note it\n"
+        "- /data is NFS, /scratch is local NVMe\n\n"
+        "IMPORTANT: After filling the playbook, fill the Recommended Optimizations table.\n"
+        "Compare what's installed vs what the hardware supports. The profile shows flash-attn and "
+        "triton are NOT installed — these are clear optimization gaps that should be listed with "
+        "concrete pip install commands, impact level, and status=pending.\n\n"
+        "The GPU-CPU Transfer Pitfalls section should be filled from the template — these are "
+        "static rules, not hardware-dependent, but they must be present.\n\n"
+        "Write the INFRA.md to {output}. Do NOT modify any other files."
+    ),
     "plan_generation": (
         "You are a research supervisor. "
         "Read {supervisor} — focus on section 2 (Supervisor Loop) for the planning process "
@@ -603,7 +919,14 @@ def run_agent(test_name: str, agent: str = "claude"):
 
     templates = ROOT / "templates"
 
-    if test_name == "plan_generation":
+    if test_name == "initialization":
+        prompt = PROMPTS[test_name].format(
+            infra_template=templates / "INFRA.template.md",
+            init=templates / "INIT.md",
+            profile=TESTS / "initialization" / "SYSTEM_PROFILE.md",
+            output=TESTS / "initialization" / "output_INFRA.md",
+        )
+    elif test_name == "plan_generation":
         prompt = PROMPTS[test_name].format(
             supervisor=SUPERVISOR,
             plan_template=templates / "PLAN.template.md",
@@ -659,7 +982,16 @@ def review_agent(test_name: str, agent: str = "claude"):
 
     templates = ROOT / "templates"
 
-    if test_name == "plan_generation":
+    if test_name == "initialization":
+        output = TESTS / "initialization" / "output_INFRA.md"
+        review_output = TESTS / "initialization" / "review_INFRA.md"
+        prompt = REVIEW_PROMPTS[test_name].format(
+            infra_template=templates / "INFRA.template.md",
+            profile=TESTS / "initialization" / "SYSTEM_PROFILE.md",
+            output=output,
+            review_output=review_output,
+        )
+    elif test_name == "plan_generation":
         output = TESTS / "plan_generation" / "output_PLAN.md"
         review_output = TESTS / "plan_generation" / "review_PLAN.md"
         prompt = REVIEW_PROMPTS[test_name].format(
@@ -737,7 +1069,7 @@ def main():
     parser.add_argument("--review", action="store_true",
                         help="LLM reviews outputs against templates (checks quality, not just structure)")
     parser.add_argument("--agent", default="claude", help="Agent CLI to use (claude, codex)")
-    parser.add_argument("--test", choices=["plan", "worker", "compression", "all"], default="all",
+    parser.add_argument("--test", choices=["init", "plan", "worker", "compression", "all"], default="all",
                         help="Which test to run")
     parser.add_argument("--debug", action="store_true", help="Show parsed table data")
     args = parser.parse_args()
@@ -745,6 +1077,7 @@ def main():
     DEBUG = args.debug
 
     tests_to_run = {
+        "init": args.test in ("init", "all"),
         "plan": args.test in ("plan", "all"),
         "worker": args.test in ("worker", "all"),
         "compression": args.test in ("compression", "all"),
@@ -752,6 +1085,8 @@ def main():
 
     # Generate outputs if requested
     if args.run:
+        if tests_to_run["init"]:
+            run_agent("initialization", args.agent)
         if tests_to_run["plan"]:
             run_agent("plan_generation", args.agent)
         if tests_to_run["worker"]:
@@ -761,6 +1096,8 @@ def main():
 
     # LLM review if requested
     if args.review:
+        if tests_to_run["init"]:
+            review_agent("initialization", args.agent)
         if tests_to_run["plan"]:
             review_agent("plan_generation", args.agent)
         if tests_to_run["worker"]:
@@ -770,6 +1107,12 @@ def main():
 
     # Validate
     results = []
+
+    if tests_to_run["init"]:
+        results.append(validate_infra(
+            TESTS / "initialization" / "output_INFRA.md",
+            TESTS / "initialization" / "SYSTEM_PROFILE.md",
+        ))
 
     if tests_to_run["plan"]:
         results.append(validate_plan(

@@ -13,6 +13,10 @@
 - **dataset**: (exact path to dataset)
 - **prior artifacts**: (paths to artifacts from earlier runs that this run builds on)
 - **output dir**: RUNS/(run ID)/artifacts/
+- **precision**: (from INFRA.md — e.g. BF16, FP16, FP32)
+- **parallelism**: (from INFRA.md — e.g. "DDP, 4 GPUs", "single GPU", "CPU only")
+- **launch**: (from INFRA.md — e.g. `torchrun --nproc_per_node=4`)
+- **scratch path**: (from INFRA.md Storage — fast path for intermediates)
 
 ## Commands
 <!-- Detailed step-by-step. Each step should explain WHAT to do and HOW to interpret results. -->

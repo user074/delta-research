@@ -14,6 +14,7 @@
 ## Environment
 <!-- Managed by environment agent. Supervisor reads, does not modify directly. -->
 <!-- Workers use this to set up before executing. -->
+<!-- Detailed hardware profile and optimization playbook in INFRA.md -->
 - **conda/venv**: (activation command, e.g. `conda activate myenv`)
 - **python**: (version)
 - **key packages**: (package versions that matter for reproducibility)
