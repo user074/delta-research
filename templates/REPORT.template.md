@@ -54,3 +54,6 @@
 - **started**: (timestamp)
 - **completed**: (timestamp)
 - **status**: (completed | failed | blocked)
+- **execution**: (direct | slurm)
+- **slurm_job_id**: (job ID, if slurm)
+- **wandb_run**: (wandb run URL, if applicable)

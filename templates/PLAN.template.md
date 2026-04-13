@@ -17,6 +17,14 @@
 - **parallelism**: (from INFRA.md — e.g. "DDP, 4 GPUs", "single GPU", "CPU only")
 - **launch**: (from INFRA.md — e.g. `torchrun --nproc_per_node=4`)
 - **scratch path**: (from INFRA.md Storage — fast path for intermediates)
+- **execution mode**: (direct | slurm — from INFRA.md Job Execution)
+
+<!-- Include this section only when execution mode is slurm -->
+## SLURM
+- **walltime**: (estimated, e.g. `04:00:00`)
+- **gpus**: (count needed, e.g. 4)
+- **memory**: (estimate, e.g. `128G`)
+- **partition**: (from INFRA.md or override, e.g. `gpu`)
 
 ## Commands
 <!-- Detailed step-by-step. Each step should explain WHAT to do and HOW to interpret results. -->

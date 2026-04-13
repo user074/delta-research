@@ -84,10 +84,16 @@ Write `RUNS/R###/PLAN.md` using `templates/PLAN.template.md` as structure.
   - Specify device placement and parallelism explicitly in plan commands — don't leave it to the worker to figure out
   - If INFRA.md doesn't exist, fall back to STATE.md Environment for basic GPU/CPU info
 
+**SLURM execution** — if INFRA.md `Job Execution → mode` is `slurm`:
+- Include a `## SLURM` section in the plan with walltime estimate, GPU count, memory, and partition
+- The worker will generate a standalone `experiment.py` + `job.sh`, submit via `sbatch`, and monitor via `scripts/wait_for_job.sh`
+- Plan commands must be self-contained — everything the compute node needs should be in experiment.py (no interactive shell commands)
+- Specify `execution mode: slurm` in Resources so the worker knows which path to follow
+
 Fill in:
 - Delta: what to change, why, what belief(s) it targets
 - Commands: detailed step-by-step analysis (multiple steps, not a single command)
-- Resources: exact paths to checkpoints, data, prior artifacts (from STATE.md Environment + prior runs)
+- Resources: exact paths to checkpoints, data, prior artifacts (from STATE.md Environment + prior runs). Include `execution mode: direct | slurm` (from INFRA.md Job Execution)
 - Success metrics: what to measure, with baselines and targets
 - Stop conditions: when to halt
 - Context: relevant beliefs, prior findings with specific numbers, data file paths
@@ -207,7 +213,7 @@ Before running any commands, activate the project environment:
 {ENV_SETUP}
 
 Verify the environment is correct before proceeding (e.g. `which python`, quick import check).
-If a package is missing, install it within the env (`pip install <pkg>`).
+If a package is missing, install it (`pip install <pkg>`). In SLURM mode, install on the login node into the target conda env — compute nodes load the same env.
 
 ## Hardware & Optimization
 
@@ -239,10 +245,16 @@ Follow the Hardware & Optimization playbook above. Specifically:
 
 ## Execution
 
-1. Read the plan carefully
-2. Execute the commands in order
-3. Record all outputs and measurements
-4. Save artifacts to RUNS/{RUN_ID}/artifacts/
+**Check the plan's Resources section for `execution mode`.**
+
+- **mode = direct** (default): Execute commands directly in the shell.
+- **mode = slurm**: Generate experiment.py + job.sh, submit via sbatch, monitor with `scripts/wait_for_job.sh`. See `templates/OBSERVABILITY.md` → SLURM Execution Workflow for the full procedure.
+
+For both modes, follow `templates/OBSERVABILITY.md`:
+- Set up the run directory: `mkdir -p RUNS/{RUN_ID}/logs RUNS/{RUN_ID}/metrics RUNS/{RUN_ID}/artifacts`
+- Write full logs to `logs/` and structured metrics to `metrics/` (every step)
+- Emit DELTA markers to stdout (sparse milestones for automation)
+- Save artifacts (plots, checkpoints) to `artifacts/`, scripts to `scripts/`
 
 ## Report
 
@@ -251,7 +263,8 @@ Write your report to REPORTS/{RUN_ID}.md. The report must be HUMAN-READABLE — 
 ### Report rules:
 - Start with a plain-language summary (what you did, what you found, what it means)
 - Put ALL data inline — numbers, tables, key values directly in the report. Do NOT just point to JSON files.
-- Generate visualizations for any numerical results. Save plots to `RUNS/{RUN_ID}/artifacts/` and embed in the report with `![description](RUNS/{RUN_ID}/artifacts/filename.png)`
+- Use data from `RUNS/{RUN_ID}/metrics/` as the authoritative source for tables and plots
+- Generate visualizations. Save to `RUNS/{RUN_ID}/artifacts/`, embed with `![description](../RUNS/{RUN_ID}/artifacts/filename.png)` (relative from REPORTS/)
 - Include your analysis — why do the results look this way? What's the interpretation?
 - The structured sections (Signal, Verdict, etc.) come AFTER the human-readable content
 
@@ -313,6 +326,9 @@ Write your report to REPORTS/{RUN_ID}.md. The report must be HUMAN-READABLE — 
 - **started**: (timestamp)
 - **completed**: (timestamp)
 - **status**: completed | failed | blocked
+- **execution**: (direct | slurm)
+- **slurm_job_id**: (job ID, if slurm)
+- **wandb_run**: (wandb run URL, if applicable)
 ```
 
 ---
@@ -399,3 +415,19 @@ When any interrupt triggers:
 1. Note it in Scratch section of STATE.md
 2. Tell the human: what happened, what was learned, what's next
 3. Wait for human input before resuming
+
+---
+
+## 7. wandb Report Generation
+
+On significant events (paradigm shift, belief resolved, every 5 runs), spawn a sub-agent to create a versioned wandb Report snapshot. Skip if wandb mode is `disabled`.
+
+The sub-agent reads `templates/WANDB_REPORTS.md` for the full spec. The supervisor passes: version number, project name, and latest run ID.
+
+Non-blocking — the loop continues regardless of Report generation.
+
+Track versions in STATE.md Scratch:
+```
+wandb_report_v1: <url> (after R005)
+wandb_report_v2: <url> (after R008, paradigm shift)
+```

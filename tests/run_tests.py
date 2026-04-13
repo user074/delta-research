@@ -7,6 +7,7 @@ Validates that the agent produces correct outputs at each stage:
   2. Plan generation: STATE.md → PLAN.md
   3. Worker execution: PLAN.md → REPORT.md
   4. State compression: STATE.md + REPORT.md → updated STATE.md
+  5. SLURM job generation: PLAN.md + INFRA.md → experiment.py + job.sh
 
 Usage:
   python tests/run_tests.py                    # validate existing outputs
@@ -382,6 +383,159 @@ def validate_infra(infra_path: Path, profile_path: Path) -> TestResult:
             "Each recommendation has a concrete command",
             has_commands,
             "Recommendations should include runnable commands (pip install, etc.)"
+        )
+
+    return r
+
+
+# ---------------------------------------------------------------------------
+# Test 0b: SLURM job generation (experiment.py + job.sh)
+# ---------------------------------------------------------------------------
+
+def validate_slurm_job(exp_path: Path, job_path: Path, plan_path: Path, infra_path: Path) -> TestResult:
+    r = TestResult("SLURM Job Generation")
+
+    # --- experiment.py ---
+    if not exp_path.exists():
+        r.check("experiment.py exists", False, f"Not found: {exp_path}")
+    else:
+        r.check("experiment.py exists", True)
+        exp = exp_path.read_text()
+
+        # DELTA markers
+        for marker in ["DELTA-START", "DELTA-PROGRESS", "DELTA-DONE"]:
+            r.check(
+                f"experiment.py has [{marker}]",
+                f"[{marker}]" in exp,
+                f"Missing {marker} marker — required by OBSERVABILITY"
+            )
+
+        # Error handling with DELTA-BLOCKER
+        r.check(
+            "experiment.py has DELTA-BLOCKER error handling",
+            "[DELTA-BLOCKER]" in exp,
+            "Must have DELTA-BLOCKER for fatal errors"
+        )
+
+        # flush=True
+        r.check(
+            "experiment.py uses flush=True",
+            "flush=True" in exp,
+            "All DELTA marker prints must use flush=True for SLURM buffering"
+        )
+
+        # Full logging
+        r.check(
+            "experiment.py has full logging setup",
+            "logs" in exp and ("train.log" in exp or "log_step" in exp or "ExperimentLogger" in exp),
+            "Must write full logs to RUNS/R###/logs/ (see OBSERVABILITY.md)"
+        )
+        r.check(
+            "experiment.py writes metrics JSON",
+            "json" in exp.lower() and ("training_history" in exp or "eval_results" in exp or "metrics" in exp),
+            "Must write structured metrics to RUNS/R###/metrics/"
+        )
+
+        # wandb integration
+        r.check(
+            "experiment.py has wandb.init",
+            "wandb.init(" in exp,
+            "Must initialize wandb for experiment tracking"
+        )
+        r.check(
+            "experiment.py has wandb.log",
+            "wandb.log(" in exp,
+            "Must log metrics to wandb"
+        )
+        r.check(
+            "experiment.py has wandb.finish",
+            "wandb.finish()" in exp,
+            "Must call wandb.finish() for clean shutdown"
+        )
+
+    # --- job.sh ---
+    if not job_path.exists():
+        r.check("job.sh exists", False, f"Not found: {job_path}")
+    else:
+        r.check("job.sh exists", True)
+        job = job_path.read_text()
+
+        # Read plan and infra for cross-reference
+        plan = plan_path.read_text() if plan_path.exists() else ""
+        infra = infra_path.read_text() if infra_path.exists() else ""
+
+        # SBATCH directives
+        r.check(
+            "job.sh has #SBATCH directives",
+            "#SBATCH" in job,
+            "Must have SLURM directives"
+        )
+
+        # Partition matches plan
+        plan_partition = "gpu"  # from fixture
+        r.check(
+            "job.sh partition matches plan",
+            f"--partition={plan_partition}" in job or f"--partition {plan_partition}" in job,
+            f"Plan specifies partition={plan_partition}"
+        )
+
+        # GPUs match plan
+        r.check(
+            "job.sh has GPU allocation",
+            "--gpus-per-node" in job or "--gres=gpu" in job,
+            "Must allocate GPUs"
+        )
+
+        # Walltime
+        r.check(
+            "job.sh has walltime",
+            "--time" in job,
+            "Must specify walltime"
+        )
+
+        # Output path includes run ID
+        r.check(
+            "job.sh output path includes R007",
+            "R007" in job and "--output" in job,
+            "Output should go to RUNS/R007/slurm-%j.out"
+        )
+
+        # Module loads from INFRA
+        r.check(
+            "job.sh has module loads",
+            "module load" in job,
+            "Must load modules from INFRA.md"
+        )
+
+        # Validated env activation (not generic conda activate)
+        has_validated_env = (
+            "/opt/conda" in job or
+            "conda activate /opt" in job or
+            "source /opt/conda" in job
+        )
+        r.check(
+            "job.sh uses validated env activation",
+            has_validated_env,
+            "Must use validated env path from INFRA.md, not generic 'conda activate'"
+        )
+
+        # wandb env vars
+        r.check(
+            "job.sh sets WANDB_PROJECT",
+            "WANDB_PROJECT" in job,
+            "Must set WANDB_PROJECT env var"
+        )
+        r.check(
+            "job.sh sets WANDB_MODE",
+            "WANDB_MODE" in job,
+            "Must set WANDB_MODE env var"
+        )
+
+        # Launches experiment.py
+        r.check(
+            "job.sh launches experiment.py",
+            "experiment.py" in job,
+            "Must run python RUNS/R007/experiment.py"
         )
 
     return r
@@ -824,6 +978,34 @@ REVIEW_PROMPTS = {
         "Overall: SATISFACTORY or NEEDS IMPROVEMENT, with a 1-2 sentence summary.\n\n"
         "Write your review to {review_output}. Do NOT modify any other files."
     ),
+    "slurm_job_generation": (
+        "You are a quality reviewer for SLURM job scripts generated by a research loop worker.\n\n"
+        "Read these files:\n"
+        "1. The SUPERVISOR spec (especially Section 4 Worker Prompt Template, Execution Mode → slurm): {supervisor}\n"
+        "2. The OBSERVABILITY (DELTA marker spec): {log_protocol}\n"
+        "3. The plan: {plan}\n"
+        "4. The INFRA: {infra}\n"
+        "5. Generated experiment.py: {experiment}\n"
+        "6. Generated job.sh: {job}\n\n"
+        "Evaluate the generated scripts. Report:\n\n"
+        "## Compliance\n"
+        "For each requirement, say PASS or FAIL:\n"
+        "- experiment.py has all DELTA markers (START, PROGRESS, DONE, BLOCKER)\n"
+        "- experiment.py uses flush=True on all marker prints\n"
+        "- experiment.py has wandb.init, wandb.log, wandb.finish\n"
+        "- experiment.py implements the plan's commands as Python code\n"
+        "- experiment.py has try/except with delta_blocker on fatal errors\n"
+        "- job.sh has correct SBATCH directives (partition, GPUs, walltime from plan)\n"
+        "- job.sh uses validated env activation from INFRA.md (not generic conda activate)\n"
+        "- job.sh sets WANDB_PROJECT and WANDB_MODE env vars\n"
+        "- job.sh output path includes run ID\n"
+        "- job.sh launches the experiment.py\n\n"
+        "## Quality issues\n"
+        "Anything wrong — missing error handling, wrong env activation, mismatched resources.\n\n"
+        "## Verdict\n"
+        "Overall: SATISFACTORY or NEEDS IMPROVEMENT.\n\n"
+        "Write your review to {review_output}. Do NOT modify any other files."
+    ),
 }
 
 
@@ -911,6 +1093,30 @@ PROMPTS = {
         "- Update Meta (total_runs, last_updated, paradigm if shift occurred)\n\n"
         "Produce the updated state and write it to {output}. Do NOT modify any other files."
     ),
+    "slurm_job_generation": (
+        "You are a research worker executing an experiment on a SLURM cluster.\n\n"
+        "Read {supervisor} — focus on Section 4 Worker Prompt Template, specifically the "
+        "'Execution Mode → mode = slurm' section for the exact steps.\n\n"
+        "Read the OBSERVABILITY at {log_protocol} for the DELTA marker spec and Python helper.\n\n"
+        "Read the plan at {plan}. Note: execution mode is slurm.\n"
+        "Read the INFRA at {infra}. Note: Job Execution section has validated env activation, "
+        "wandb mode=offline, partition=gpu.\n\n"
+        "Your task: Generate ONLY the experiment.py and job.sh files. Do NOT actually submit anything.\n\n"
+        "1. Write {experiment} — a self-contained Python script that:\n"
+        "   - Includes the DELTA marker helper functions (from OBSERVABILITY)\n"
+        "   - Implements ALL plan commands as Python code\n"
+        "   - Has wandb.init/log/finish integration\n"
+        "   - Emits DELTA-START at beginning, DELTA-PROGRESS at milestones, DELTA-DONE at end\n"
+        "   - Has try/except with delta_blocker for fatal errors\n"
+        "   - Uses flush=True on ALL prints\n\n"
+        "2. Write {job} — a SLURM job script that:\n"
+        "   - Has #SBATCH directives from the plan's SLURM section\n"
+        "   - Uses the validated env activation from INFRA.md Job Execution\n"
+        "   - Sets WANDB_PROJECT, WANDB_MODE, WANDB_RUN_NAME env vars\n"
+        "   - Has --output=RUNS/R007/slurm-%j.out\n"
+        "   - Launches python RUNS/R007/experiment.py\n\n"
+        "Do NOT modify any other files."
+    ),
 }
 
 
@@ -947,6 +1153,15 @@ def run_agent(test_name: str, agent: str = "claude"):
             state_before=TESTS / "state_compression" / "STATE_before.md",
             report=TESTS / "state_compression" / "REPORT.md",
             output=TESTS / "state_compression" / "output_STATE_after.md",
+        )
+    elif test_name == "slurm_job_generation":
+        prompt = PROMPTS[test_name].format(
+            supervisor=SUPERVISOR,
+            log_protocol=templates / "OBSERVABILITY.md",
+            plan=TESTS / "slurm_job_generation" / "PLAN.md",
+            infra=TESTS / "slurm_job_generation" / "INFRA.md",
+            experiment=TESTS / "slurm_job_generation" / "output_experiment.py",
+            job=TESTS / "slurm_job_generation" / "output_job.sh",
         )
     else:
         print(f"Unknown test: {test_name}")
@@ -1021,6 +1236,23 @@ def review_agent(test_name: str, agent: str = "claude"):
             output=output,
             review_output=review_output,
         )
+    elif test_name == "slurm_job_generation":
+        experiment = TESTS / "slurm_job_generation" / "output_experiment.py"
+        job = TESTS / "slurm_job_generation" / "output_job.sh"
+        review_output = TESTS / "slurm_job_generation" / "review_slurm.md"
+        if not experiment.exists() and not job.exists():
+            print(f"\n--- Skipping review of {test_name}: output files not found ---")
+            return
+        prompt = REVIEW_PROMPTS[test_name].format(
+            supervisor=SUPERVISOR,
+            log_protocol=templates / "OBSERVABILITY.md",
+            plan=TESTS / "slurm_job_generation" / "PLAN.md",
+            infra=TESTS / "slurm_job_generation" / "INFRA.md",
+            experiment=experiment,
+            job=job,
+            review_output=review_output,
+        )
+        output = experiment  # for the exists() check below
     else:
         print(f"Unknown test: {test_name}")
         return
@@ -1069,7 +1301,7 @@ def main():
     parser.add_argument("--review", action="store_true",
                         help="LLM reviews outputs against templates (checks quality, not just structure)")
     parser.add_argument("--agent", default="claude", help="Agent CLI to use (claude, codex)")
-    parser.add_argument("--test", choices=["init", "plan", "worker", "compression", "all"], default="all",
+    parser.add_argument("--test", choices=["init", "plan", "worker", "compression", "slurm", "all"], default="all",
                         help="Which test to run")
     parser.add_argument("--debug", action="store_true", help="Show parsed table data")
     args = parser.parse_args()
@@ -1081,6 +1313,7 @@ def main():
         "plan": args.test in ("plan", "all"),
         "worker": args.test in ("worker", "all"),
         "compression": args.test in ("compression", "all"),
+        "slurm": args.test in ("slurm", "all"),
     }
 
     # Generate outputs if requested
@@ -1093,6 +1326,8 @@ def main():
             run_agent("worker_execution", args.agent)
         if tests_to_run["compression"]:
             run_agent("state_compression", args.agent)
+        if tests_to_run["slurm"]:
+            run_agent("slurm_job_generation", args.agent)
 
     # LLM review if requested
     if args.review:
@@ -1104,6 +1339,8 @@ def main():
             review_agent("worker_execution", args.agent)
         if tests_to_run["compression"]:
             review_agent("state_compression", args.agent)
+        if tests_to_run["slurm"]:
+            review_agent("slurm_job_generation", args.agent)
 
     # Validate
     results = []
@@ -1130,6 +1367,14 @@ def main():
             TESTS / "state_compression" / "STATE_before.md",
             TESTS / "state_compression" / "output_STATE_after.md",
             TESTS / "state_compression" / "REPORT.md",
+        ))
+
+    if tests_to_run["slurm"]:
+        results.append(validate_slurm_job(
+            TESTS / "slurm_job_generation" / "output_experiment.py",
+            TESTS / "slurm_job_generation" / "output_job.sh",
+            TESTS / "slurm_job_generation" / "PLAN.md",
+            TESTS / "slurm_job_generation" / "INFRA.md",
         ))
 
     # Summary

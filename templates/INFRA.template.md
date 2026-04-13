@@ -222,12 +222,48 @@
 #SBATCH --cpus-per-task=(N)
 #SBATCH --mem=(N)G
 #SBATCH --time=(walltime)
-#SBATCH --output=RUNS/%x-%j.out
+#SBATCH --output=(project_root)/RUNS/(run_id)/slurm-%j.out
+
+# Anchor to project root — all relative paths resolve from here
+cd (project_root)
 
 (module loads)
 (conda/venv activation)
+
+# wandb configuration (if enabled)
+export WANDB_PROJECT=(project)
+export WANDB_MODE=(online | offline)
+export WANDB_RUN_NAME=(run_id)
+export WANDB_DIR=(project_root)/RUNS/(run_id)/wandb
+
 (launch command)
 ```
+
+---
+
+## Job Execution
+<!-- Filled during init. Determines how workers run experiments. -->
+<!-- mode=direct: worker executes commands directly (local server). -->
+<!-- mode=slurm: worker generates experiment.py + job.sh, submits via sbatch. -->
+
+- **mode**: (direct | slurm)
+- **project root**: (absolute path to project root, accessible from compute nodes — e.g. `/mnt/shared/user/my-project`)
+  <!-- All relative paths in job scripts (RUNS/, REPORTS/, scripts/) are resolved against this. -->
+  <!-- Must be on a filesystem mounted on both login and compute nodes. -->
+  <!-- Validated by the SLURM test job during init. -->
+- **validated env activation**:
+  <!-- Exact commands proven to work on compute nodes. -->
+  <!-- For SLURM: must use absolute conda path, correct module loads. -->
+  <!-- Validated by the SLURM test job during init. -->
+  ```bash
+  (e.g. module load cuda/12.2 anaconda3)
+  (e.g. /opt/conda/bin/conda activate llm-ft)
+  ```
+- **wandb mode**: (online | offline | disabled)
+- **wandb project**: (project name, or N/A)
+- **wandb entity**: (entity/team, or N/A)
+- **test job status**: (passed | failed | not run)
+- **test job notes**: (e.g. "compute nodes have no internet — using WANDB_MODE=offline")
 
 ---
 

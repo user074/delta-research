@@ -23,6 +23,8 @@
 - **checkpoints**: (paths to model checkpoints)
 - **datasets**: (paths to datasets)
 - **working dir**: (project root path)
+- **wandb project**: (project name, or "disabled")
+- **wandb entity**: (entity/team, or N/A)
 
 ---
 
