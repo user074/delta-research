@@ -46,7 +46,7 @@ Detect which agent is running. Write or update the appropriate instruction file(
 | Agent | Instruction file | Multi-agent config |
 |-------|-----------------|-------------------|
 | Claude Code | `CLAUDE.md` | N/A (Task tool built-in) |
-| OpenAI Codex | `AGENTS.md` | `codex.toml` or project config |
+| OpenAI Codex | `AGENTS.md` | `codex features enable multi_agent` |
 | Cursor | `.cursorrules` | N/A |
 
 If unsure, write both `CLAUDE.md` and `AGENTS.md`.
@@ -73,13 +73,15 @@ The file should contain:
   - How to run: `To continue research, say: "run the research loop"`
   - **Autonomous operation rule**: The loop does NOT stop after a few runs. It keeps cycling until an interrupt boundary triggers (budget exceeded, blocker, ambiguity).
 
-For Codex, also enable multi-agent in config:
+For Codex, enable multi-agent once before running the loop:
+```bash
+codex features enable multi_agent
+```
+
+If the user prefers manual configuration instead of the CLI helper, tell them to set:
 ```toml
 [features]
 multi_agent = true
-
-[agents.worker]
-description = "Research worker: executes a single experiment plan, writes a structured report. Never modifies STATE.md or PLAN.md."
 ```
 
 For Codex, also add this section to `AGENTS.md` to prevent premature turn-ending:
