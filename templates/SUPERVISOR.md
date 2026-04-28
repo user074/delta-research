@@ -89,6 +89,11 @@ Write `RUNS/R###/PLAN.md` using `templates/PLAN.template.md` as structure.
 - The worker will generate a standalone `experiment.py` + `job.sh`, submit via `sbatch`, and monitor via `scripts/wait_for_job.sh`
 - Plan commands must be self-contained — everything the compute node needs should be in experiment.py (no interactive shell commands)
 - Specify `execution mode: slurm` in Resources so the worker knows which path to follow
+- **GPU count** — request the minimum needed, not the maximum available. More GPUs = longer queue wait.
+  - **Model fits on 1 GPU** (inference, small fine-tune, analysis): request 1 GPU
+  - **Training benefits from data parallelism** (large dataset, long training): request GPUs per INFRA.md Parallelism guidance
+  - **Model doesn't fit on 1 GPU** (FSDP/ZeRO needed): request the minimum GPUs for the model to fit
+  - When in doubt, start with fewer GPUs — queue time matters more than marginal speedup
 
 Fill in:
 - Delta: what to change, why, what belief(s) it targets

@@ -203,15 +203,58 @@
 <!-- Fill this section only for SLURM/PBS/LSF managed clusters. -->
 <!-- For local machines, write "N/A — local machine" and skip. -->
 
+### Connection
 - **scheduler**: (SLURM | PBS | LSF | N/A — local machine)
 - **login host**: (e.g. `login.cluster.edu`)
-- **partition**: (e.g. `gpu`, `a100`)
-- **account/project**: (e.g. `mylab`)
-- **QOS**: (e.g. `normal`)
-- **max walltime**: (e.g. `48:00:00`)
-- **max GPUs per job**: (e.g. 8)
-- **module loads**: (e.g. `module load cuda/12.2 cudnn/8.9 anaconda3`)
-- **submission template**:
+- **cluster docs**: (URL — paste any wiki/handbook the user provides, or "none")
+
+### Partitions
+<!-- One row per partition the user has access to. Probe via `sinfo -o "%P %a %l %D %G"`.
+     Capture multiple partitions when they exist — debug/short partitions usually have
+     much shorter queue times than the default GPU partition. -->
+
+| Partition | Account | QOS | Max walltime | GPUs/job | Typical use |
+|-----------|---------|-----|--------------|----------|-------------|
+| (e.g. gpu) | (mylab) | (normal) | (48:00:00) | (8) | (default for runs >1h) |
+| (e.g. gpu-debug) | (mylab) | (debug) | (1:00:00) | (2) | (quick tests, fast queue) |
+
+- **default partition**: (which one to use for typical runs)
+- **fast-queue partition**: (which one to use for short tests when queue is busy)
+- **available accounts**: (from `sacctmgr show user $USER` — e.g. `mylab,gpu-allocation`)
+
+### Modules & Env
+- **available CUDA modules**: (from `module avail cuda` — e.g. `cuda/12.1, cuda/12.2, cuda/12.4`)
+- **standard module loads**: (e.g. `module load cuda/12.2 anaconda3`)
+- **conda env path**: (absolute, accessible from compute — e.g. `/opt/conda/envs/llm-ft`. The compute nodes mount the same filesystem, so installing on the login node is enough.)
+
+### Storage Policy
+<!-- CRITICAL: clusters have multiple filesystems with different rules. The agent cannot
+     auto-detect which path is "approved" for which use — ask the user. Common pattern:
+     home is small/backed-up (NOT for large files), Lustre/GPFS for bulk data, scratch for temp. -->
+
+- **home directory**: (e.g. `/mnt/home/$USER` — small quota, backed up, NOT for large files)
+- **large data / datasets**: (e.g. `/mnt/lustre/datasets/` — bulk parallel storage, no backup)
+- **checkpoints / model outputs**: (e.g. `/mnt/lustre/$USER/checkpoints/` — fast writes, no quota)
+- **scratch / temp**: (e.g. `/scratch/$USER/` — node-local SSD, may be purged after job)
+- **HuggingFace cache**: (e.g. `/mnt/lustre/$USER/.cache/huggingface` — set `HF_HOME` to avoid filling home)
+- **shared group storage**: (e.g. `/mnt/lustre/labshared/` — group-readable, ask before writing)
+
+### Quotas
+- **home**: (e.g. `50 GB used / 100 GB limit` — from `quota -s`)
+- **other**: (e.g. `lustre: no quota`, `scratch: 5 TB`, file-count limits if any)
+
+### Conventions
+<!-- Lab/group/cluster conventions that aren't discoverable from commands. Ask the user. -->
+
+- **walltime convention**: (e.g. "request the minimum needed — short jobs get higher priority")
+- **GPU request convention**: (e.g. "request 1 GPU unless training needs more — queue time grows with count")
+- **fairshare considerations**: (e.g. "lab share is shared with 5 others — long jobs reduce others' priority")
+- **forbidden actions**: (e.g. "do not run GPU work on login node, do not write >1GB to home")
+- **other**: (anything else the user mentioned — local quirks, lab rules, on-call)
+
+### Submission Template
+<!-- Use the partition + storage policy above. All paths absolute. -->
+
 ```bash
 #!/bin/bash
 #SBATCH --job-name=(name)

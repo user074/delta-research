@@ -140,23 +140,56 @@ After basic environment setup, create INFRA.md from `templates/INFRA.template.md
      `torch`, `flash_attn`, `deepspeed`, `accelerate`, `apex`, `bitsandbytes`, `xformers`, `triton`, `vllm`
    - Fused optimizer support: `python -c "import torch; print('fused_adam:', 'fused' in torch.optim.AdamW.__init__.__code__.co_varnames)" 2>/dev/null`; also check for apex FusedAdam
 
-3. **For clusters — assisted profile:**
-   - Ask the human: "I detected a SLURM/PBS cluster. Do you have documentation I can read? Provide a URL, or paste the relevant info (partitions, GPU types, module loads, quotas, storage paths)."
-   - If URL provided: use WebFetch to read the documentation, extract partition names, GPU types, module loads, walltime limits, storage topology
-   - If human pastes text: parse it directly
-   - Also run what's available locally: `sinfo -N -l`, `module avail cuda 2>&1 | head -10`, `scontrol show partition`, `df -h`
+3. **For clusters — probe, then interview:**
 
-4. **For remote clusters (can't access from here):**
-   - Give the human a compact command block to run on the cluster and paste back:
-     ```
-     echo "=== GPU ===" && nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader,nounits 2>/dev/null || echo "No GPUs"
-     echo "=== CPU ===" && lscpu | grep -E 'Model name|^CPU\(s\)|Thread'
-     echo "=== RAM ===" && free -h | head -2
-     echo "=== SLURM ===" && sinfo -N -l 2>/dev/null | head -20
-     echo "=== MODULES ===" && module avail cuda 2>&1 | head -10
-     echo "=== STORAGE ===" && df -h /home /scratch /tmp 2>/dev/null
-     ```
-   - Parse the pasted output to fill INFRA.md
+   Cluster setup is two-step: probe what the scheduler exposes (objective facts), then interview the human about policies and conventions (subjective rules — not discoverable from commands).
+
+   **Step A: Probe the scheduler.** Run on the login node (or hand to the human if remote):
+
+   ```bash
+   echo "=== PARTITIONS ===" && sinfo -o "%P %a %l %D %G %N" 2>/dev/null | head -30
+   echo "=== USER ACCOUNTS ===" && sacctmgr show user $USER format=user,account,defaultaccount -P 2>/dev/null
+   echo "=== QOS ===" && sacctmgr show qos format=name,maxwall,maxtres,priority -P 2>/dev/null | head -20
+   echo "=== FAIRSHARE ===" && sshare -U 2>/dev/null
+   echo "=== AVAILABLE MODULES ===" && module avail cuda anaconda3 2>&1 | head -30
+   echo "=== LOADED MODULES ===" && module list 2>&1
+   echo "=== HOME QUOTA ===" && quota -s 2>/dev/null
+   echo "=== MOUNTED FILESYSTEMS ===" && df -hT 2>/dev/null | grep -iE "lustre|gpfs|nfs|panfs|beegfs|home|scratch|work"
+   echo "=== HOME SIZE ===" && du -sh $HOME 2>/dev/null
+   echo "=== GPU ===" && nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader,nounits 2>/dev/null || echo "no GPUs on login node"
+   ```
+
+   This populates: partition list, accounts, QOS, module versions, mount points, quotas. **Don't assume defaults from the probe alone** — the human knows which paths/partitions are *appropriate*, not just *available*.
+
+   **Step B: Interview the human about cluster policy.** One round at a time, not all at once. Lead with what the probe found and ask for confirmation/extension.
+
+   *Round 1 — Storage policy* (the most common source of failure — defaults are wrong on most clusters):
+   > "I see these mounts: [list from `df -hT`]. Where should I store:
+   > - Datasets / large input data?
+   > - Model checkpoints and intermediate outputs?
+   > - Scratch / temporary files (per-run, can be purged)?
+   > - HuggingFace cache (model downloads — can be tens of GB)?
+   >
+   > I'll avoid your home directory for large files unless you say otherwise. Is there a shared group storage path I should know about?"
+
+   *Round 2 — Partition policy*:
+   > "I see these partitions: [list from `sinfo`]. Which should I use for typical runs? Is there a fast-queue partition for short tests (e.g. `gpu-debug`)? Any partition-specific rules?"
+
+   *Round 3 — Account, QOS, fairshare*:
+   > "Your accounts: [from `sacctmgr`]. Default: [X]. Any QOS conventions for your group? Any fairshare considerations (e.g. lab quota shared with N people, long jobs reduce others' priority)?"
+
+   *Round 4 — Conventions and forbidden actions*:
+   > "Anything else I should know — walltime conventions (e.g. 'always request the minimum'), forbidden actions (e.g. 'never run on login node'), local quirks of this cluster, lab rules?"
+
+   *Round 5 — Documentation*:
+   > "Is there a cluster documentation URL or wiki I should read?" If yes, WebFetch it and extract anything else relevant.
+
+   **Step C: Fill INFRA.md Cluster section** combining probe output + interview answers. Quotas, mount paths, and partition list come from the probe; storage policy, fairshare considerations, and conventions come from the human. Then fill Storage → Paths from the storage policy answers.
+
+4. **For remote clusters (can't run commands locally):**
+   - Hand the probe block from step 3A to the human, ask them to run it on the cluster and paste back the output
+   - Then conduct the same interview (steps 3B and 3C) — same questions, just no live probe
+   - Also confirm the project root path and conda env path explicitly, since you can't verify them locally
 
 5. **Derive the Optimization Playbook:**
    Use these rules to fill each playbook section. The template (INFRA.template.md) has detailed comments for each — follow those for the full decision tree.
