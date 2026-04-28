@@ -54,6 +54,14 @@ report = wr.Report(
 5. **Run summary table** — from Ledger, with links to individual wandb runs
 6. **Interactive data** — wandb panel grids for metrics that benefit from interactive exploration
 
+### Plot quality rules (common pitfalls)
+
+- **X-axis = `step` (not `epoch`)** — workers log to wandb with `step=global_step`. Plots that default to `epoch` will be empty or wrong. Always set `x="step"` (or `x="_step"`) on Line/Scalar panels unless the run actually logged epoch as the primary x-axis.
+- **Filter runs explicitly** — when a panel shows "no data", the cause is usually that the panel's run filter doesn't match any runs. Set the runset filter to the specific run names (`R001`, `R002`, ...) rather than relying on defaults.
+- **Verify metric keys exist** — before referencing `eval/loss` in a panel, confirm runs actually logged that key. Check `wandb.Api().run(<run>).history().columns` if unsure.
+- **One y-axis per scale** — don't put loss (0–10) and accuracy (0–1) on the same axis. Split into separate panels or use dual axes.
+- **Missing runs in plots** — if a recently-completed run isn't appearing, it may not have synced yet. For offline mode, ensure `wandb sync` ran before generating the Report.
+
 ### Versioning
 
 Each Report is a versioned snapshot — preserves how understanding evolved:

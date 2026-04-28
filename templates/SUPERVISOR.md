@@ -253,7 +253,11 @@ Follow the Hardware & Optimization playbook above. Specifically:
 **Check the plan's Resources section for `execution mode`.**
 
 - **mode = direct** (default): Execute commands directly in the shell.
-- **mode = slurm**: Generate experiment.py + job.sh, submit via sbatch, monitor with `scripts/wait_for_job.sh`. See `templates/OBSERVABILITY.md` → SLURM Execution Workflow for the full procedure.
+- **mode = slurm**: Generate experiment.py + job.sh, submit via sbatch, monitor with `scripts/wait_for_job.sh`. See `templates/OBSERVABILITY.md` → SLURM Execution Workflow for the full procedure. Do NOT manually poll `squeue` — `wait_for_job.sh` handles monitoring.
+
+**Smoke test before hero run** (when the plan has a `## Smoke Test` section): generate `experiment_smoke.py` + `job_smoke.sh` from the smoke config, submit to the fast-queue partition, validate VRAM and throughput, refine the hero walltime if needed. Only submit the hero run after the smoke passes. See OBSERVABILITY.md → Step 0.
+
+**Failure recovery is part of the run.** If a command fails or the SLURM job exits non-zero: read the logs, diagnose, attempt a fix, and re-run. Iterate up to 2-3 times. Only escalate to BLOCKER when the failure requires changing the plan or human input. See `templates/OBSERVABILITY.md` → Step 5 for SLURM-specific recovery patterns.
 
 For both modes, follow `templates/OBSERVABILITY.md`:
 - Set up the run directory: `mkdir -p RUNS/{RUN_ID}/logs RUNS/{RUN_ID}/metrics RUNS/{RUN_ID}/artifacts`

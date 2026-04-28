@@ -31,7 +31,15 @@ Ask the human to list their hypotheses one by one. Do not dump all questions at 
 - What are the competing explanations? (these shape the frontier)
 - What would change your mind? (this defines what "discriminating" means)
 
-**Round 3 — Practical setup**:
+**Round 3 — Reference repos**:
+Before assuming the agent should build from scratch, ask:
+- Are there existing repos, scaffolds, or codebases that this work should build on or reuse?
+- Any reference implementations of the methods you want to test? (papers' official code, model weights, evaluation harnesses)
+- Any internal/lab code that solves an adjacent problem you'd want to copy from?
+
+Record these as paths or URLs in STATE.md Environment → "Reference repos". When the loop runs experiments, the agent should check this list first and reuse rather than re-implementing. **Building from scratch when a known good implementation exists is wasted work.**
+
+**Round 4 — Practical setup**:
 Ask the human to list their constraints one by one. Do not dump all questions at once.
 - What does success look like? When would you stop?
 - Any constraints — time budget, compute limits, things not to touch?
@@ -67,11 +75,93 @@ The file should contain:
 - **Research loop** section:
   - Research question and goals (from interview)
   - Key constraints (from interview)
-  - Pointer: `See delta-research/templates/SUPERVISOR.md for the loop spec`
-  - Pointer: `Current state (beliefs, what's been tried, frontier) lives in STATE.md`
-  - Pointer: Human-readable summary lives in SYNTHESIS.md
   - How to run: `To continue research, say: "run the research loop"`
-  - **Autonomous operation rule**: The loop does NOT stop after a few runs. It keeps cycling until an interrupt boundary triggers (budget exceeded, blocker, ambiguity).
+
+- **Reference: where to find what** (lookup table — agents should consult this when they need a spec, not guess):
+
+  *delta-research framework specs (read-only — copied into the project as a git submodule, subtree, or directory):*
+
+  | File | What's in it | When to read |
+  |------|--------------|--------------|
+  | `delta-research/templates/SUPERVISOR.md` | Full 7-phase loop spec, worker prompt template, state compression rules, bandit-based delta ranking, paradigm shift handling | When running the loop, designing a delta, or compressing state |
+  | `delta-research/templates/OBSERVABILITY.md` | DELTA marker protocol, run directory structure (`logs/`, `metrics/`, `checkpoints/`, `artifacts/`, `scripts/`), full logging spec, SLURM execution workflow, failure recovery | When generating `experiment.py` or `job.sh`, debugging a failed run, or interpreting DELTA markers |
+  | `delta-research/templates/WANDB_REPORTS.md` | wandb Report sub-agent spec — triggers, what to read, what to produce, plot quality rules | When a Report trigger fires (paradigm shift, belief resolved, every 5 runs) |
+  | `delta-research/templates/INIT.md` | First-time initialization (interview, env setup, INFRA.md, SLURM test job) | Only when re-initializing — env change, new cluster, etc. |
+  | `delta-research/templates/STATE.template.md` | Structure of STATE.md | When seeding STATE.md from scratch |
+  | `delta-research/templates/PLAN.template.md` | Structure of PLAN.md (Delta, Resources, SLURM, Commands, Predictions, Success metrics, Stop conditions, Context, Meta) | When writing a plan in Phase 3 |
+  | `delta-research/templates/REPORT.template.md` | Structure of REPORT.md (Summary, Method, Results with predicted-vs-actual, Signal, Verdict, Confounds, New hypotheses, Next tests, Meta) | When the worker is writing a report |
+  | `delta-research/templates/INFRA.template.md` | Structure of INFRA.md (compute, optimization playbook, storage, cluster, job execution) | When (re)building INFRA.md |
+  | `delta-research/scripts/wait_for_job.sh` | Blocking SLURM monitor — tails output for DELTA markers, exits on DONE/BLOCKER, has FIFO read + 30s safety net | Use it directly via `bash scripts/wait_for_job.sh <JOB_ID> <OUTPUT_FILE>`. Never reimplement. |
+
+  *Runtime files (this project's working memory — written and updated by the loop):*
+
+  | File / dir | What's in it | Owned by |
+  |------------|--------------|----------|
+  | `STATE.md` | Current beliefs, ledger, frontier, environment. **Read first in any research conversation.** | Supervisor (read+write). Workers never touch. |
+  | `INFRA.md` | Hardware profile, optimization playbook, storage paths, cluster config, validated env activation | Init agent (write); supervisor + workers (read) |
+  | `SYNTHESIS.md` | Human-facing narrative — what we've learned and where we are | Supervisor (write at paradigm shift / belief resolution) |
+  | `REPORTS/R###.md` | Per-run reports — full data, plots, analysis, verdict | Worker (write); supervisor (read in Phase 5) |
+  | `RUNS/R###/` | Per-run dir: `PLAN.md` (immutable), `experiment.py`, `job.sh`, `slurm-*.out`, `logs/`, `metrics/`, `checkpoints/`, `artifacts/`, `scripts/` | Supervisor writes PLAN.md; worker writes the rest |
+
+  *When in doubt:*
+  - Lost context after compaction? → re-read `STATE.md` (current state) + this CLAUDE.md/AGENTS.md (rules). For phase details, re-read `SUPERVISOR.md`.
+  - Worker crashed? → read `RUNS/R###/logs/stderr.log` + `RUNS/R###/slurm-*.out`, then `OBSERVABILITY.md` Step 5 for recovery patterns.
+  - Don't know which file format? → check `delta-research/templates/<name>.template.md`.
+
+- **Loop discipline** (these are the patterns that get lost after context compaction. CLAUDE.md/AGENTS.md is reloaded every conversation, so put the rules here, not just in SUPERVISOR.md):
+
+  **The 7 phases** (one cycle):
+  1. Read STATE.md (beliefs, ledger, frontier)
+  2. Select the highest-ranked delta from Frontier
+  3. Write PLAN.md to `RUNS/R###/PLAN.md`
+  4. Spawn a worker with the plan
+  5. Ingest the worker's REPORT.md
+  6. Compress STATE.md (update beliefs, append ledger, refresh frontier, update SYNTHESIS.md if a paradigm shifted)
+  7. Loop back to phase 1
+
+  **Hard contracts** (do not break these):
+  - Workers NEVER modify STATE.md or PLAN.md
+  - Plans are IMMUTABLE once created — no edits between create and execute
+  - Workers suggest new directions ONLY via the report's "New hypotheses" and "Next tests" sections
+  - Workers use ONLY resources specified in the plan's Resources section. If a resource is missing → BLOCKER.
+
+  **A run is atomic**: phases 3–6 are one unit. Once a plan is approved (Phase 2), do NOT pause to ask "should I launch the script?" — launch it. Don't ask for permission between submit/wait/sync/report.
+
+  **Smoke test before hero run**: For any non-trivial run (training, long benchmarks, anything >30 min), run the plan's `## Smoke Test` first — short walltime, fast-queue partition, 1 GPU, small data slice. Use it to validate paths, VRAM headroom, throughput, and refine the hero walltime estimate. A failed 4-hour run wastes 4 hours of compute *and* queue time. Skip only for runs <10 min, deterministic non-GPU analyses, or a near-identical config that succeeded in the last 24 hours. See OBSERVABILITY.md Step 0 for the procedure.
+
+  **SLURM is one unit**: `sbatch` → `bash scripts/wait_for_job.sh ${JOB_ID} {OUTPUT_FILE}` → `wandb sync` (if offline) → write REPORT.md. No breaks. Do NOT manually poll `squeue` — `wait_for_job.sh` handles monitoring with FIFO-based reading and a 30s safety net.
+
+  **Failure recovery is part of the run**: If a run hits DELTA-BLOCKER, non-zero exit, or missing output: read logs, diagnose (env issue, OOM, code bug, missing path), fix, re-run. Iterate up to 2-3 times. Only escalate to BLOCKER when the failure is truly unfixable without human input.
+
+  **Interrupt boundaries** (the ONLY valid reasons to stop the loop):
+  - BUDGET — time/compute budget exceeded
+  - NULL_STREAK — N consecutive runs with null discrimination (N from STATE.md Policy)
+  - BLOCKER — unrecoverable failure
+  - AMBIGUITY — beliefs/frontier can't be updated without human input
+  - IRREVERSIBLE — about to take an action that can't be undone
+
+  **Autonomous operation**: The loop does NOT stop after a few runs. It cycles until an interrupt boundary triggers. Don't emit user-facing summaries between cycles.
+
+  **State compression after each run** (Phase 6):
+  - Append one row to STATE.md Ledger: `| R### | <delta> | <signal> | <verdict> | #N | [link](REPORTS/R###.md) |`
+  - Update affected beliefs' confidence based on verdict + signal
+  - Add new beliefs from "New hypotheses" (confidence 0.5)
+  - Refresh Frontier — remove completed delta, add candidates from "Next tests"
+  - Update SYNTHESIS.md narrative if a paradigm shifted or a belief resolved
+
+  **Wandb Report triggers** (spawn the Report sub-agent — see WANDB_REPORTS.md):
+  - Paradigm shift (core belief rejected, confidence dropped ≥ 0.3)
+  - Belief resolved (reached `supported` or `rejected`)
+  - Every 5 runs (periodic snapshot)
+
+  **Worker spawning**:
+  - Claude Code: `Task(subagent_type="general-purpose", prompt=<filled Worker Prompt Template from SUPERVISOR.md Section 4>)`
+  - Codex: Spawn a sub-agent with the same filled template.
+
+- **File management** rules (large files):
+  - Checkpoints save to `RUNS/{RUN_ID}/checkpoints/` (per-run) or to the cluster checkpoint path from INFRA.md Storage. Add `RUNS/*/checkpoints/` and `checkpoints/` to `.gitignore`.
+  - HuggingFace cache lives at the path from INFRA.md Storage (set `HF_HOME`). Never let it default to `~/.cache/huggingface`.
+  - Datasets are read from the path in INFRA.md Storage — do not download into the project tree.
 
 For Codex, enable multi-agent once before running the loop:
 ```bash

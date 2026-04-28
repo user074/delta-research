@@ -21,9 +21,11 @@ RUNS/R###/
 │   └── stderr.log                 # Errors, warnings, stack traces
 ├── metrics/                       # Structured JSON — machine-readable
 │   └── *.json                     # e.g. results.json, training_history.json, benchmark_scores.json
-├── artifacts/                     # Outputs referenced by the report
+├── checkpoints/                   # Large model weights — gitignored, may be redirected to scratch
+│   └── (model weights, optimizer states, ...)
+├── artifacts/                     # Small outputs referenced by the report
 │   ├── *.png                      # Generated plots and visualizations
-│   └── (other outputs)            # Checkpoints, generated samples, processed data, etc.
+│   └── (small outputs)            # Generated samples, processed data summaries
 └── scripts/                       # Helper scripts generated during the run
     └── *.py / *.sh
 ```
@@ -31,9 +33,17 @@ RUNS/R###/
 **Rules:**
 - **logs/** — Dense, append-only text files. One line per step or event. For humans to analyze what happened in detail. Name files by purpose (e.g. `train.log` for training, `benchmark.log` for benchmarks, `analysis.log` for data analysis).
 - **metrics/** — Structured JSON. Machine-readable, used by the report generator and wandb sync. Name files by phase (e.g. `results.json`, `training_history.json`, `scores.json`).
-- **artifacts/** — Outputs that the report references. Plots, checkpoints, generated samples. No scripts, no logs.
+- **checkpoints/** — Large model weights and optimizer states. Separate from `artifacts/` so the whole tree can be gitignored (`RUNS/*/checkpoints/`). On clusters, this directory may be a symlink to a scratch path from INFRA.md (e.g. `/scratch/$USER/{RUN_ID}/`) — the report still references `checkpoints/<file>` regardless.
+- **artifacts/** — Small outputs that the report references: plots, generated samples, processed data summaries. NOT model weights — those go in `checkpoints/`. No scripts, no logs.
 - **scripts/** — Any Python or shell scripts generated during the run. Keeps artifacts/ clean.
-- Workers must create `logs/` and `metrics/` directories. `artifacts/` and `scripts/` are created as needed.
+- Workers must create `logs/` and `metrics/` directories. `checkpoints/`, `artifacts/`, and `scripts/` are created as needed.
+
+**Gitignore pattern:**
+```
+RUNS/*/checkpoints/
+RUNS/*/slurm-*.out
+RUNS/*/wandb/
+```
 
 ---
 
@@ -325,6 +335,34 @@ All three should be emitted when wandb is enabled. Full logs + DELTA markers are
 
 When execution mode is `slurm`, the worker generates self-contained scripts and submits via SLURM. The agent runs on the login node — never execute GPU workloads directly.
 
+### Step 0 — Smoke test (required for non-trivial runs)
+
+Before submitting the hero run, validate the setup with a 5-15 minute smoke test. The plan's `## Smoke Test` section defines the parameters. The cost is small; the savings are large — a failed 4-hour run wastes 4 hours of compute *and* queue time.
+
+**Procedure:**
+1. Generate `experiment_smoke.py` — same code as `experiment.py`, but parameterized for the smoke config (small dataset slice, few steps, small batch, 1 GPU)
+2. Generate `job_smoke.sh` — same env activation, but with the smoke walltime, GPUs, and the fast-queue partition (from INFRA.md → Cluster → Partitions, if one exists)
+3. Submit and wait: `JOB_ID=$(sbatch --parsable {PROJECT_ROOT}/RUNS/{RUN_ID}/job_smoke.sh)` then `bash scripts/wait_for_job.sh ${JOB_ID} {PROJECT_ROOT}/RUNS/{RUN_ID}/slurm-smoke-${JOB_ID}.out`
+4. Read the smoke output to extract: throughput (steps/sec or tokens/sec), peak VRAM, time per step
+5. Compare against plan's `Smoke Test → validate` and `abort` thresholds:
+   - **VRAM > 90%** → reduce hero batch size (or enable gradient checkpointing) before submitting hero run
+   - **Throughput implies hero walltime > 1.5× plan estimate** → either revise the plan's walltime or reduce hero scope
+   - **Any error** → debug, fix, re-run smoke. Don't proceed to hero run with unresolved errors.
+6. Only submit the hero run if the smoke test passes
+
+**Skip the smoke test ONLY when:**
+- The run is <10 minutes total (smoke test isn't faster than the run itself)
+- It's a deterministic analysis with no GPU model training
+- A nearly-identical config (same data, same model, same hardware) succeeded in the last 24 hours — record this in the report's Method section
+
+**Common things smoke tests catch** (each one is a wasted hero run if missed):
+- Dataset path not mounted on compute nodes
+- OOM at hero batch size
+- Precision mismatch (FP16 NaNs, BF16 loss-scale issue)
+- Slow DataLoader bottleneck (GPU util <50%)
+- Walltime underestimate (smoke 10min × 100 = 1000min, but plan said 480min)
+- DELTA markers not firing because of stdout buffering
+
 ### Step 1 — Generate `experiment.py`
 
 Write `RUNS/{RUN_ID}/experiment.py` — a standalone Python script that:
@@ -363,9 +401,23 @@ echo "Submitted job ${JOB_ID}"
 bash {PROJECT_ROOT}/scripts/wait_for_job.sh ${JOB_ID} {PROJECT_ROOT}/RUNS/{RUN_ID}/slurm-${JOB_ID}.out
 ```
 
+**Do NOT manually poll `squeue -j` or `tail -f` the output file in a loop.** `wait_for_job.sh` already does this with a FIFO-based reader and a 30s safety net for vanished jobs. Repeated `squeue` polling wastes tokens and adds latency. The script blocks until DELTA-DONE / DELTA-BLOCKER, then exits with the right code.
+
+**For long jobs**, the human-facing observability is wandb. The DELTA markers in stdout give the agent automation signals (start, milestones, done); wandb gives the human a live dashboard with metrics, plots, and ETA. If wandb is enabled, share the run URL with the human at submission time so they can watch progress without reading the SLURM output.
+
 ### Step 4 — Post-job processing
 
 After the job completes:
 - If wandb mode is `offline`, sync: `wandb sync RUNS/{RUN_ID}/wandb/`
 - Read the full SLURM output file for any details not captured by markers
 - Write the report to `REPORTS/{RUN_ID}.md` as usual
+
+### Step 5 — Failure recovery
+
+If `wait_for_job.sh` exits non-zero (DELTA-BLOCKER, vanished, timeout):
+1. Read the SLURM output file and `RUNS/{RUN_ID}/logs/stderr.log` to diagnose
+2. Common fixes: OOM → reduce batch / enable gradient checkpointing; missing path → check the path is mounted on compute nodes; env activation failed → re-validate against INFRA.md `validated env activation`; CUDA error → check GPU was actually requested
+3. Apply the fix to `experiment.py` or `job.sh`, resubmit. Iterate up to 2-3 times.
+4. Only escalate to BLOCKER (and report to supervisor) if the failure is structural — a wrong assumption in the plan, missing data, or an environment problem requiring human action.
+
+This recovery happens *inside the run* — the supervisor sees one report covering the final outcome. Don't surface mid-run failures unless they're blockers.

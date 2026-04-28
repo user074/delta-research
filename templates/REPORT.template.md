@@ -24,6 +24,12 @@
 ### Analysis
 (Interpret the results. Why do they look this way? What patterns? What's surprising?)
 
+### Predicted vs actual
+<!-- Compare against the plan's Predictions section. Surprises are signal. -->
+| Metric | Predicted | Actual | Surprise? |
+|--------|-----------|--------|-----------|
+| (metric) | (from plan) | (observed) | (yes/no — what does the gap mean?) |
+
 ## Signal
 - **discrimination**: (discriminating | partial | null)
 - (why — what did we learn or fail to learn?)
