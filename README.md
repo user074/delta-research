@@ -1,135 +1,206 @@
 # delta-research
 
-LLM-driven research loop. Copy into any project. The agent reads one file and runs everything.
+**An autonomous research loop for any agent.** Drop into your project. The agent picks hypotheses, designs experiments, runs them, and updates its beliefs — until it answers your research question or hits a budget.
 
-## Why this exists
+**Compatible with what you already have.** No rewrites, no new infra. Works on top of your existing scripts and however you already submit jobs.
 
-Research is messy. You start with a hypothesis, run experiments, and sometimes discover your entire framing was wrong. That's not failure — that's learning. But it's hard to manage manually, especially when you're juggling multiple hypotheses, tracking what you've tried, and deciding what to test next.
+**Human steers, agent codes.** You own the hypotheses and the direction. The agent designs runs, writes scripts, debugs failures, and updates the belief table. You stay in flow — less coding, more thinking.
 
-The core insight: **what you care about is the hypotheses, not the experiments.** Experiments are just tools to move hypotheses toward supported or rejected. So we delegate experiment design, execution, and bookkeeping to the agent, and you focus on what matters — your beliefs about the problem and whether they hold up.
+**Hands-off execution.** The agent monitors experiments, parallelizes GPU utilization, smoke-tests before hero runs, and recovers from common failures. You read `SYNTHESIS.md` when you want to check in.
 
-The agent runs autonomously: it picks the most uncertain hypothesis, designs an experiment to test it, runs it, and updates its beliefs. We can have maximum information gain with most uncertain hypotheses. When a hypothesis turns out to be completely wrong, the system handles that gracefully — it flags dependent beliefs for re-evaluation and keeps going. You check in when you want, read the summary, and steer.
 
-## Key design principles
-
-![Research Loop](assets/research_loop.png)
-
-- **Hypotheses over experiments** — The belief table is the real output. Experiments exist to move beliefs toward supported or rejected. The agent handles the experimental details; you own the hypotheses.
-- **Wrong is fine, stuck is not** — Research often means discovering your assumptions were wrong. Rejecting a hypothesis is as valuable as confirming one. The system is designed around this: paradigm shifts are a first-class concept, and dependent beliefs get flagged for re-evaluation automatically.
-- **Delta-first** — The unit of progress is *what changed → what happened → what it means*. Every run produces a clear delta.
-- **Bisect the hypothesis space** — A good experiment splits uncertain beliefs in two. The agent prioritizes tests with the highest expected information gain.
-- **Compatibility with existing tools** — Just use your Claude Code or Codex. No custom infrastructure. We recommend multi-agent mode for Codex.
-
-## Quick start
-
-1. Copy `delta-research/` into your project
-2. Activate your environment: `conda activate your-env` or `source venv/bin/activate`
-3. Start your code agent. For full autonomy use `--dangerously-skip-permissions` (Claude Code) or `--full-auto` (Codex). If you use Codex, enable multi-agent once with `codex features enable multi_agent`, then launch Codex from the project root (`codex --full-auto` or `codex exec --full-auto "<prompt>"`).
-4. Tell your agent: *"Read `./delta-research/README.md` and initialize the research loop"*
-5. The agent reads `templates/INIT.md`, interviews you, sets up permissions, detects your environment, and creates `STATE.md`
-6. **To start the automated research loop**: Tell your agent: *"Run the research loop"*
-
-The loop runs autonomously — picks deltas, spawns workers, ingests reports, compresses state, repeats. It stops only on interrupt boundaries (budget exceeded, blocker hit, no more hypotheses to test).
-
-Works with Claude Code, OpenAI Codex, Cursor, or any agent that reads markdown and executes commands.
-
-## Initialization
-
-When told to initialize, the agent reads `templates/INIT.md` and will:
-1. **Understand the project and write agent instructions** — read the codebase, interview you about research goals/hypotheses/constraints, then write CLAUDE.md/AGENTS.md with project context and research loop pointers
-2. **Set up environment** — spawn an environment agent to detect conda/venv, GPUs, verify dependencies, locate checkpoints and datasets
-3. **Set up permissions** — configure auto-approval for shell commands so the loop runs without interruption (asks you which level you want)
-4. **Create directories** — `REPORTS/`, `RUNS/`
-5. **Create `STATE.md`** — seed beliefs from your hypotheses, initial experiment frontier, environment config
-
-The full procedure is in `templates/INIT.md`.
-
-## What to read after running
-
-You don't need to dig through experiment logs. The system produces outputs at different levels of detail:
-
-| What | File | When to read it |
-|------|------|-----------------|
-| **Big picture** | `SYNTHESIS.md` | **Start here.** Plain-language summary of what's known, what changed, and what's next. Written for a human who hasn't been following the loop. Updated after major discoveries or every 5 runs. |
-| **Structured state** | `STATE.md` | When you want to see exact belief confidences, the full experiment ledger, or the frontier of planned experiments. This is the agent's working memory. |
-| **Individual experiments** | `REPORTS/R###.md` | When you want full details on a specific run — method, data tables, plots, analysis, and interpretation. Each report is self-contained and human-readable. |
-| **Raw outputs** | `RUNS/R###/artifacts/` | When you need the actual files — plots, CSVs, model outputs. Reports embed key visualizations, but the raw artifacts live here. |
-
-**Typical workflow:** Read `SYNTHESIS.md` to see the current understanding. If something is surprising or interesting, click through to the relevant report for details. You rarely need to look at `STATE.md` directly unless you want to inspect belief scores or re-rank the frontier yourself.
-
-## What's in the box
-
-### Templates (you copy these in)
-
-```
-templates/
-  INIT.md                # First-time setup — interview, environment, permissions
-  SUPERVISOR.md          # The loop — delta selection, worker spawning, state compression
-  STATE.template.md      # Structure for STATE.md
-  PLAN.template.md       # Structure for per-run plans
-  REPORT.template.md     # Structure for per-run reports
-  SYNTHESIS.template.md  # Structure for SYNTHESIS.md — human-facing living summary
+```mermaid
+flowchart LR
+    S[STATE.md<br/>beliefs · ledger · frontier] --> P[Pick highest-value delta<br/>uncertainty × info-gain × feasibility]
+    P --> PL[PLAN.md<br/>predictions · metrics · smoke test]
+    PL --> W[Worker<br/>direct shell or SLURM sbatch]
+    W --> R[REPORT.md<br/>data · plots · verdict]
+    R --> C[Compress<br/>update beliefs · refresh frontier]
+    C --> S
 ```
 
-### Runtime files (created by the agent)
+---
+
+## Recent updates
+
+- **SLURM support** — generate `experiment.py` + `job.sh`, submit, monitor
+- **wandb integration** — live metrics + versioned cumulative Reports
+- **Observability framework** — DELTA markers, dense logs, run directories
+- **INFRA profile** — hardware + cluster config + optimization playbook
+- **Smoke tests** — fast-queue dry run before hero run
+- **Cluster probe + interview** — partitions, storage policy, fairshare
+- **Persistent CLAUDE.md/AGENTS.md rules** — loop discipline survives compaction
+- **Predictions in plans** — predicted vs actual in reports. Good for your brain's on-policy learning!
+- **Reference repo discovery** — reuse existing scaffolds, don't rebuild
+
+---
+
+## Quickstart
+
+```bash
+# 1. Clone delta-research into your project
+cd your-project
+git clone https://github.com/user074/delta-research.git ./delta-research
+
+# 2. Activate your env, then start your agent
+conda activate your-env
+claude --dangerously-skip-permissions  # or: codex --full-auto
+```
+
+In the agent, send these two prompts:
 
 ```
-STATE.md          # Agent's working memory — beliefs, ledger, frontier, environment
-SYNTHESIS.md      # Human-facing summary — what we know, what changed, what's next
-REPORTS/
-  R001.md         # Full experiment report — method, results, analysis, verdict
-  R002.md
-  ...
-RUNS/
-  R001/
-    PLAN.md       # What the agent planned to do (immutable once created)
-    artifacts/    # Raw outputs — plots, CSVs, model checkpoints, logs
-  R002/
-    ...
+Initialize delta-research
 ```
 
-**Why `RUNS/` and `REPORTS/` are separate:** Reports are the human-readable record — you read these. Runs contain the plan and raw artifacts — the agent references these. Separating them keeps the reports directory clean and scannable.
+The agent reads `delta-research/templates/INIT.md`, interviews you about your research question, hypotheses, and constraints, profiles your hardware, and seeds `STATE.md`. On clusters, it interviews you about partitions and storage policy, then validates with a test SLURM job.
 
-## Running
+```
+Run the research loop
+```
 
-> "Run the research loop"
+The loop runs autonomously until it hits a budget, blocker, or asks you something. Read `SYNTHESIS.md` whenever you want to check in.
 
-The agent reads `templates/SUPERVISOR.md` and cycles: pick the hypothesis most likely to discriminate, design an experiment, spawn a worker, ingest the report, compress state, repeat.
+> **Codex users:** enable multi-agent once with `codex features enable multi_agent`. Then `codex --full-auto` from the project root.
+
+---
+
+## What you get
+
+| File | Contents | When to read |
+|------|----------|--------------|
+| `SYNTHESIS.md` | Plain-language summary: current beliefs, recent findings, what's next | **Start here** |
+| `STATE.md` | Belief table with confidences, run ledger, experiment frontier | When you want exact numbers |
+| `REPORTS/R###.md` | Per-experiment report — method, data, plots, verdict | Drilling into a result |
+| `RUNS/R###/` | Plan, logs, metrics, checkpoints, artifacts, scripts | Raw data |
+| wandb dashboard | Live training metrics + cumulative versioned Reports | While experiments are running |
+
+---
+
+## Why use this
+
+What's better than hands-off 72 hours and let agent do its thing? 
+
+|  | Notebook | MLflow / W&B | AutoML / sweep | **delta-research** |
+|---|---|---|---|---|
+| Picks what to test next | you | you | within param grid | **agent** |
+| Tracks experiments | manual | yes | yes | yes |
+| Updates beliefs from results | in your head | no | implicit | **explicit, with confidence** |
+| Handles paradigm shifts | you reframe | no | no | **dependent beliefs flagged** |
+| Designs the experiment | you | you | within search space | **agent** |
+| Use it when | one-off analysis | you know what to test | optimizing a known objective | **open research question** |
+
+---
 
 ## How it works
 
-The loop treats research as a bandit problem over hypothesis space. Each run targets the most uncertain belief with an experiment designed to discriminate — push the belief clearly toward supported or rejected. The agent scores candidates on three dimensions (uncertainty of the target belief, expected information gain, feasibility) and picks the highest-value experiment.
+A "delta" is one experiment: *what changed → what happened → what it means*. The loop has 7 phases:
 
-Negative results that clearly reject a hypothesis are as valuable as positive ones. The goal is to bisect the belief space efficiently. When a core belief is rejected, the system detects the paradigm shift, flags all dependent beliefs for re-evaluation, and adjusts the frontier accordingly.
+1. **Read** STATE.md (current beliefs, ledger, frontier)
+2. **Select** the highest-value delta (uncertainty × info-gain × feasibility)
+3. **Plan** the experiment — including predictions, success metrics, and a smoke test
+4. **Spawn** a worker to execute (direct shell or SLURM sbatch)
+5. **Ingest** the worker's REPORT.md
+6. **Compress** state — update belief confidences, append ledger, refresh frontier
+7. **Loop** back to step 1
+
+The loop stops only on interrupt boundaries: `BUDGET`, `NULL_STREAK`, `BLOCKER`, `AMBIGUITY`, or `IRREVERSIBLE`. Otherwise it keeps cycling.
+
+**Hypotheses over experiments.** The belief table is the real output. Experiments are tools to push beliefs toward supported or rejected.
+
+**Wrong is fine, stuck is not.** Rejecting a hypothesis is as valuable as confirming one. When a core belief is rejected (confidence drops ≥ 0.3), dependent beliefs are flagged for re-evaluation and the frontier is adjusted.
+
+**Smoke test first.** For non-trivial runs, the worker submits a 5-15 minute smoke test on the fast-queue partition before committing GPU-hours to the hero run. Catches OOM, missing paths, walltime underestimates, and precision bugs.
+
+---
+
+## SLURM clusters
+
+The framework is cluster-aware out of the box. On SLURM:
+
+- **Init interviews you** about partitions, storage policy (`/mnt/home` vs `/mnt/lustre` matters — defaults are wrong on most clusters), accounts, QOS, fairshare conventions
+- **Validates with a test job** before committing to real runs (env activation, GPU access, NCCL, dataset paths mounted on compute nodes)
+- **Workers generate self-contained `experiment.py` + `job.sh`**, submit via `sbatch`, monitor via `scripts/wait_for_job.sh` (FIFO-based, no polling)
+- **DELTA marker protocol** for sparse automation signals; full logs to `RUNS/R###/logs/`; live metrics to wandb
+- **All paths are absolute**, anchored to a project-root field in `INFRA.md` so jobs work regardless of compute-node CWD
+
+See `templates/OBSERVABILITY.md` for the full execution workflow and `templates/INFRA.template.md` for the cluster profile.
+
+---
+
+## Works with
+
+- **Claude Code** — `claude` CLI, uses Task tool for worker spawning
+- **OpenAI Codex** — `codex --full-auto`, requires `codex features enable multi_agent`
+- **Cursor** and any other agent that reads markdown and runs commands
+
+---
+
+## What's in the box
+
+```
+delta-research/
+├── templates/
+│   ├── INIT.md              # First-time setup (interview, env, hardware, SLURM)
+│   ├── SUPERVISOR.md        # The 7-phase loop spec, worker prompt template
+│   ├── OBSERVABILITY.md     # DELTA markers, run logging, SLURM workflow
+│   ├── WANDB_REPORTS.md     # wandb Report sub-agent spec
+│   ├── INFRA.template.md    # Hardware + cluster profile
+│   ├── STATE.template.md
+│   ├── PLAN.template.md
+│   ├── REPORT.template.md
+│   └── SYNTHESIS.template.md
+├── scripts/
+│   └── wait_for_job.sh      # Universal SLURM monitor (FIFO + 30s safety net)
+└── tests/
+    └── run_tests.py         # Structural + LLM-review tests for all artifacts
+```
+
+---
 
 ## Testing
 
-`tests/` has sample fixtures and automated validation at two levels:
-
-1. **Structural validation** (regex-based) — checks required sections, inline data, table formats, belief updates, frontier changes. Fast, deterministic, runs without an agent.
-2. **LLM review** (`--review`) — spawns the agent to evaluate output quality against the templates. Checks whether the agent followed the rules correctly, flags hallucinations, vagueness, wrong belief targeting, missing context, and other LLM-specific issues. Writes a detailed review with PASS/FAIL per requirement and an overall verdict.
-
 ```bash
-# Generate outputs by spawning the agent, then validate
-python tests/run_tests.py --run
-
-# Or run a single test
-python tests/run_tests.py --run --test plan
-python tests/run_tests.py --run --test worker
-python tests/run_tests.py --run --test compression
-
-# Validate existing outputs (no agent needed)
+# Validate existing outputs (no agent, fast)
 python tests/run_tests.py
 
-# LLM review — agent evaluates output quality against templates
-python tests/run_tests.py --review
-python tests/run_tests.py --review --test compression
+# Generate outputs by running the agent, then validate
+python tests/run_tests.py --run
 
-# Generate, review, then validate (full pipeline)
+# LLM review — agent evaluates output quality against templates
 python tests/run_tests.py --run --review
 
-# Use codex instead of claude
-python tests/run_tests.py --run --review --agent codex
+# Single test
+python tests/run_tests.py --run --test plan
+python tests/run_tests.py --run --test slurm
+
+# Use Codex instead of Claude
+python tests/run_tests.py --run --agent codex
 ```
 
-After editing templates, re-run `--run --review` to regenerate outputs and check whether the agent follows the updated rules.
+After editing templates, re-run `--run --review` to verify the agent follows the updated rules.
+
+---
+
+## Updating
+
+```bash
+cd your-project/delta-research
+git pull
+```
+
+Existing `STATE.md`, `INFRA.md`, `SYNTHESIS.md`, `REPORTS/`, and `RUNS/` are untouched — they live in your project root, not in `delta-research/`.
+
+---
+
+## Feedback
+
+Bugs, feature requests, and questions: [github.com/user074/delta-research/issues](https://github.com/user074/delta-research/issues).
+
+If the agent finds something unclear, broken, or missing while running the loop, it should suggest you open an issue with a snippet of the failure or confusion — that's the fastest way to get it fixed.
+
+---
+
+## License
+
+MIT

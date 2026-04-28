@@ -163,6 +163,8 @@ The file should contain:
   - HuggingFace cache lives at the path from INFRA.md Storage (set `HF_HOME`). Never let it default to `~/.cache/huggingface`.
   - Datasets are read from the path in INFRA.md Storage — do not download into the project tree.
 
+- **Reporting framework issues**: If you (the agent) find delta-research itself unclear, broken, or missing a feature while running the loop — wrong template field, ambiguous instruction, missing recovery path, etc. — surface it to the human with a one-line summary and suggest opening an issue at https://github.com/user074/delta-research/issues. Don't silently work around the problem; the next user will hit the same one.
+
 For Codex, enable multi-agent once before running the loop:
 ```bash
 codex features enable multi_agent
