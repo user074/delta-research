@@ -189,7 +189,7 @@ All other markers (`START`, `PROGRESS`, `METRIC`, `ERROR`) are informational.
 
 ## Why flush matters
 
-SLURM buffers stdout by default. Without explicit flushing, markers may not appear in the output file until the job ends — defeating the purpose of live monitoring. Every `print()` call that emits a DELTA marker must use `flush=True`.
+Stdout is buffered whenever it's redirected to a file or pipe — SLURM `--output`, `tee`, shell `>`, `nohup`, backgrounded processes. Without explicit flushing, DELTA markers may not appear until the process ends — defeating live monitoring in both `slurm` and `direct` modes. Every `print()` call that emits a DELTA marker must use `flush=True`.
 
 Python's `-u` flag (unbuffered) is an alternative but less reliable across all environments. Explicit `flush=True` is the recommended approach.
 
@@ -331,11 +331,93 @@ All three should be emitted when wandb is enabled. Full logs + DELTA markers are
 
 ---
 
-## SLURM Execution Workflow
+## Execution Workflow
+
+INFRA.md → Job Execution → `mode` selects the workflow: `direct` (agent runs `experiment.py` itself) or `slurm` (agent submits to a scheduler). Both modes share the DELTA markers, `ExperimentLogger`, run directory structure, and wandb integration above — only the launch and monitoring plumbing differ.
+
+---
+
+### Direct Mode
+
+The agent runs `experiment.py` directly on the local machine — no scheduler, no `job.sh`, no `slurm-*.out`. The agent process owns the run lifecycle.
+
+#### Step 0 — Smoke test (required for non-trivial runs)
+
+Same rationale as SLURM mode (see below): a 5-15 minute smoke test catches OOM, dataset path issues, precision bugs, DataLoader bottlenecks, and walltime miscalibration before the hero run burns hours. The "skip" rules and "common things smoke tests catch" list both apply unchanged.
+
+**Procedure:**
+1. Generate `experiment_smoke.py` — same code as `experiment.py`, parameterized for the smoke config (small dataset slice, few steps, small batch, 1 GPU)
+2. Run and capture: `python {PROJECT_ROOT}/RUNS/{RUN_ID}/experiment_smoke.py 2>&1 | tee {PROJECT_ROOT}/RUNS/{RUN_ID}/logs/smoke.out`
+3. Extract throughput, peak VRAM (e.g. `nvidia-smi --query-gpu=memory.used --format=csv` during the run), time per step
+4. Compare against the plan's `Smoke Test → validate` and `abort` thresholds — same rules as SLURM mode (VRAM > 90% → reduce batch; throughput implies hero > 1.5× plan estimate → revise; any error → fix and re-smoke)
+5. Only run the hero if smoke passes
+
+#### Step 1 — Generate `experiment.py`
+
+Identical content to SLURM mode (see Step 1 below): DELTA helpers, `ExperimentLogger`, wandb logging when enabled, try/except wrapping with `delta_blocker()`, `delta_progress()` at milestones, `delta_metric()` at log intervals, `flush=True` on every print. No `job.sh` is generated.
+
+**Wandb env vars** — set them at the top of `experiment.py` before `wandb.init()`, so the run is reproducible without depending on shell state:
+
+```python
+import os
+RUN_ID = "R001"
+PROJECT_ROOT = "/home/researcher/llm-finetune"  # from INFRA.md
+RUN_DIR = os.path.join(PROJECT_ROOT, "RUNS", RUN_ID)
+
+os.environ.setdefault("WANDB_PROJECT", "delta-research")  # from INFRA.md → wandb
+os.environ.setdefault("WANDB_MODE", "online")             # direct usually has internet
+os.environ.setdefault("WANDB_RUN_NAME", RUN_ID)
+os.environ["WANDB_DIR"] = os.path.join(RUN_DIR, "wandb")
+```
+
+Direct mode typically uses `WANDB_MODE=online` (local dev box has internet). Use `offline` only when explicitly required by INFRA.md.
+
+#### Step 2 — Run and monitor
+
+Foreground (default — agent sees DELTA markers live):
+
+```bash
+mkdir -p {PROJECT_ROOT}/RUNS/{RUN_ID}/logs
+python {PROJECT_ROOT}/RUNS/{RUN_ID}/experiment.py 2>&1 | tee {PROJECT_ROOT}/RUNS/{RUN_ID}/logs/run.out
+```
+
+There's no `wait_for_job.sh` — the foreground pipe blocks until the process exits. Exit code is the Python process's: 0 after `delta_done()`, 1 after `delta_blocker()` (which calls `sys.exit(1)`).
+
+Background (for long runs the agent shouldn't block on):
+
+```bash
+nohup python {PROJECT_ROOT}/RUNS/{RUN_ID}/experiment.py > {PROJECT_ROOT}/RUNS/{RUN_ID}/logs/run.out 2>&1 &
+echo $! > {PROJECT_ROOT}/RUNS/{RUN_ID}/run.pid
+# Poll for terminal markers:
+tail -f {PROJECT_ROOT}/RUNS/{RUN_ID}/logs/run.out | grep --line-buffered -E '\[DELTA-(DONE|BLOCKER)\]'
+```
+
+When wandb is enabled, share the run URL with the human at submission time — that's the primary live dashboard, same as SLURM mode.
+
+#### Step 3 — Post-job processing
+
+- If wandb mode is `offline`: `wandb sync {PROJECT_ROOT}/RUNS/{RUN_ID}/wandb/`
+- If wandb mode is `online` (typical for direct): nothing to sync — run is already on the dashboard
+- Read `logs/run.out` and `logs/stderr.log` for any details not captured by markers
+- Write the report to `REPORTS/{RUN_ID}.md` as usual
+
+#### Step 4 — Failure recovery
+
+If the process exits non-zero (DELTA-BLOCKER or unhandled exception):
+1. Read `logs/run.out` and `logs/stderr.log` to diagnose
+2. Common fixes: OOM → reduce batch / enable gradient checkpointing; missing dependency → `pip install`; CUDA error → check GPU is visible (`nvidia-smi`) and not held by another process; env mismatch → re-validate against INFRA.md `validated env activation`
+3. Apply the fix to `experiment.py`, re-run. Iterate up to 2-3 times.
+4. Only escalate to BLOCKER if the failure is structural — wrong assumption in the plan, missing data, or environment issue requiring human action.
+
+This recovery happens *inside the run* — the supervisor sees one report covering the final outcome.
+
+---
+
+### SLURM Mode
 
 When execution mode is `slurm`, the worker generates self-contained scripts and submits via SLURM. The agent runs on the login node — never execute GPU workloads directly.
 
-### Step 0 — Smoke test (required for non-trivial runs)
+#### Step 0 — Smoke test (required for non-trivial runs)
 
 Before submitting the hero run, validate the setup with a 5-15 minute smoke test. The plan's `## Smoke Test` section defines the parameters. The cost is small; the savings are large — a failed 4-hour run wastes 4 hours of compute *and* queue time.
 
@@ -363,7 +445,7 @@ Before submitting the hero run, validate the setup with a 5-15 minute smoke test
 - Walltime underestimate (smoke 10min × 100 = 1000min, but plan said 480min)
 - DELTA markers not firing because of stdout buffering
 
-### Step 1 — Generate `experiment.py`
+#### Step 1 — Generate `experiment.py`
 
 Write `RUNS/{RUN_ID}/experiment.py` — a standalone Python script that:
 - Includes the DELTA marker helpers (from Python helper section above)
@@ -377,7 +459,7 @@ Write `RUNS/{RUN_ID}/experiment.py` — a standalone Python script that:
 - Logs to `ExperimentLogger` at EVERY step (dense — for analysis)
 - Uses `flush=True` on ALL print calls (critical for SLURM output buffering)
 
-### Step 2 — Generate `job.sh`
+#### Step 2 — Generate `job.sh`
 
 Write `RUNS/{RUN_ID}/job.sh` using the INFRA.md submission template:
 - **All paths must be absolute.** Read `project root` from INFRA.md Job Execution. Prefix all project-relative paths with it.
@@ -390,7 +472,7 @@ Write `RUNS/{RUN_ID}/job.sh` using the INFRA.md submission template:
 
 **Why absolute paths:** Compute nodes may start in a different CWD (e.g. `/home/user` or `/tmp`). Even with `cd`, the `#SBATCH --output` path is resolved before any commands run, so it must be absolute. Model checkpoints and dataset paths from the plan are already absolute.
 
-### Step 3 — Submit and monitor
+#### Step 3 — Submit and monitor
 
 ```bash
 # Submit — capture job ID (use absolute paths)
@@ -405,14 +487,14 @@ bash {PROJECT_ROOT}/scripts/wait_for_job.sh ${JOB_ID} {PROJECT_ROOT}/RUNS/{RUN_I
 
 **For long jobs**, the human-facing observability is wandb. The DELTA markers in stdout give the agent automation signals (start, milestones, done); wandb gives the human a live dashboard with metrics, plots, and ETA. If wandb is enabled, share the run URL with the human at submission time so they can watch progress without reading the SLURM output.
 
-### Step 4 — Post-job processing
+#### Step 4 — Post-job processing
 
 After the job completes:
 - If wandb mode is `offline`, sync: `wandb sync RUNS/{RUN_ID}/wandb/`
 - Read the full SLURM output file for any details not captured by markers
 - Write the report to `REPORTS/{RUN_ID}.md` as usual
 
-### Step 5 — Failure recovery
+#### Step 5 — Failure recovery
 
 If `wait_for_job.sh` exits non-zero (DELTA-BLOCKER, vanished, timeout):
 1. Read the SLURM output file and `RUNS/{RUN_ID}/logs/stderr.log` to diagnose

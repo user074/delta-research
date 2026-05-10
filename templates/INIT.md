@@ -125,11 +125,17 @@ The file should contain:
   - Workers suggest new directions ONLY via the report's "New hypotheses" and "Next tests" sections
   - Workers use ONLY resources specified in the plan's Resources section. If a resource is missing → BLOCKER.
 
-  **A run is atomic**: phases 3–6 are one unit. Once a plan is approved (Phase 2), do NOT pause to ask "should I launch the script?" — launch it. Don't ask for permission between submit/wait/sync/report.
+  **A run is atomic — phases 3–6 are one unit. The cycle ends at Phase 6, NOT at Phase 4.**
+  Once a plan is approved (Phase 2), launch the worker. Don't ask for permission between submit/wait/sync/report. After the worker writes `REPORTS/R###.md`, you (the supervisor) must immediately, in the same turn:
+  1. **Phase 5 — Ingest the report.** Read `REPORTS/R###.md`. Pull out the signal, verdict, numbers, new hypotheses.
+  2. **Phase 6 — Compress STATE.md.** Append the Ledger row. Update belief confidences. Refresh the Frontier. Update SYNTHESIS.md if a belief resolved or paradigm shifted. Spawn the wandb Report sub-agent if a trigger fires (paradigm shift, belief resolution, every 5 runs — see WANDB_REPORTS.md). The wandb sub-agent runs in the background and does NOT block this phase.
+  3. Then either continue to Phase 1 of the next cycle, or stop **only** at an interrupt boundary.
+
+  **"The experiment succeeded" is NOT a stopping condition.** Neither is "the worker wrote the report." A cycle that ends with REPORT.md written but STATE.md unchanged is a half-done cycle — the loop has lost memory of what just happened. The supervisor's job isn't done until STATE.md reflects the new run. The expected shape of every cycle is: *plan → worker executes → worker analyzes + visualizes + writes REPORT.md → supervisor ingests → supervisor updates STATE.md/SYNTHESIS.md → either continue or hit an interrupt boundary*. The only valid stops are the interrupt boundaries below — never mid-cycle.
 
   **Smoke test before hero run**: For any non-trivial run (training, long benchmarks, anything >30 min), run the plan's `## Smoke Test` first — short walltime, fast-queue partition, 1 GPU, small data slice. Use it to validate paths, VRAM headroom, throughput, and refine the hero walltime estimate. A failed 4-hour run wastes 4 hours of compute *and* queue time. Skip only for runs <10 min, deterministic non-GPU analyses, or a near-identical config that succeeded in the last 24 hours. See OBSERVABILITY.md Step 0 for the procedure.
 
-  **SLURM is one unit**: `sbatch` → `bash scripts/wait_for_job.sh ${JOB_ID} {OUTPUT_FILE}` → `wandb sync` (if offline) → write REPORT.md. No breaks. Do NOT manually poll `squeue` — `wait_for_job.sh` handles monitoring with FIFO-based reading and a 30s safety net.
+  **SLURM is one unit**: `sbatch` → `bash scripts/wait_for_job.sh ${JOB_ID} {OUTPUT_FILE}` → `wandb sync` (if offline) → write REPORT.md → **Phase 5 (ingest) → Phase 6 (compress STATE.md)**. No breaks. The moment `wait_for_job.sh` returns, do NOT yield — keep going through Phases 5 and 6 in the same turn. Do NOT manually poll `squeue` — `wait_for_job.sh` handles monitoring with FIFO-based reading and a 30s safety net.
 
   **Failure recovery is part of the run**: If a run hits DELTA-BLOCKER, non-zero exit, or missing output: read logs, diagnose (env issue, OOM, code bug, missing path), fix, re-run. Iterate up to 2-3 times. Only escalate to BLOCKER when the failure is truly unfixable without human input.
 
@@ -148,6 +154,16 @@ The file should contain:
   - Add new beliefs from "New hypotheses" (confidence 0.5)
   - Refresh Frontier — remove completed delta, add candidates from "Next tests"
   - Update SYNTHESIS.md narrative if a paradigm shifted or a belief resolved
+
+  **Schedule the next cycle at end of Phase 7** (so the loop is trackable and survives session pauses):
+  - **Claude Code in a `/loop` session**: call `ScheduleWakeup` with the same `/loop` prompt, picking `delaySeconds` based on what's pending (60–270s if waiting on a job to settle, 1200–1800s if idle). Set `reason` to one specific sentence — that's the human's tracking signal.
+  - **Claude Code outside `/loop`**: just return to Phase 1 in the same turn. Do not invent a scheduling call.
+  - **Codex**: use OS-level `at` since `/loop` doesn't exist on Codex —
+    ```bash
+    echo "cd $(pwd) && codex exec --full-auto 'continue research loop — read STATE.md and proceed from Phase 1'" \
+        | at now + 30 minutes
+    ```
+    If `at`/`atrun` isn't available, continue in the same session and record the limitation in STATE.md Scratch. See SUPERVISOR.md Phase 7(b) for the full pattern.
 
   **Wandb Report triggers** (spawn the Report sub-agent — see WANDB_REPORTS.md):
   - Paradigm shift (core belief rejected, confidence dropped ≥ 0.3)
@@ -187,7 +203,8 @@ Rules for the research loop:
 - Do NOT emit user-facing progress messages between cycles. No "here's what I found so far." No "completed R003, ready for next pass."
 - Do NOT treat "substantial progress" as a reason to yield control. The interrupt boundaries in STATE.md Policy are the ONLY valid reasons to stop.
 - "Keep experiments short" means each experiment is fast to execute. It does NOT mean "run one cycle and stop." Short experiments = more cycles per session, not fewer.
-- After updating STATE.md (Phase 7), go directly back to reading STATE.md (Phase 1). Do not produce any output between these steps.
+- **A cycle ends at Phase 6 (STATE.md compressed), not at Phase 4 (worker done) or Phase 5 (report read).** When the worker finishes writing REPORTS/R###.md, immediately ingest it (Phase 5), update STATE.md and SYNTHESIS.md (Phase 6) in the same turn, then return to Phase 1 — do not stop in between. "The experiment succeeded" is not a stopping condition.
+- After updating STATE.md (Phase 6), go directly back to reading STATE.md (Phase 1). Do not produce any output between these steps.
 - The only time you talk to the human is when an interrupt boundary fires.
 ```
 

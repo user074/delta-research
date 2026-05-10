@@ -44,7 +44,7 @@ git clone https://github.com/user074/delta-research.git ./delta-research
 
 # 2. Activate your env, then start your agent
 conda activate your-env
-claude --dangerously-skip-permissions  # or: codex --full-auto
+claude --dangerously-skip-permissions  # or: codex --yolo
 ```
 
 In the agent, send these two prompts:

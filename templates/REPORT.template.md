@@ -18,7 +18,7 @@
 | (metric) | (value) | (interpretation) |
 
 ### Visualizations
-<!-- Generate plots for numerical results. Save to artifacts/, embed here. Ensure the path is relative to the report file.-->
+<!-- Generate plots for numerical results. Save EVERY plot to RUNS/(run ID)/artifacts/<filename> — never under REPORTS/. Embed below using `../RUNS/(run ID)/artifacts/...` (the `../` is required because this report lives in REPORTS/ and RUNS/ is its sibling). -->
 ![description](../RUNS/(run ID)/artifacts/plot_name.png)
 
 ### Analysis

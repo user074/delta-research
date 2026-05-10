@@ -55,8 +55,10 @@
 <!-- Add more steps as needed. A good plan has 3-6 substantive steps. -->
 
 ### Final step: Write report
-Write report to REPORTS/(run ID).md following the report template.
-Include all data inline, generate visualizations, embed plots with ![](path).
+Write report to `REPORTS/(run ID).md` following the report template.
+Include all data inline.
+
+**Plots:** save every plot to `RUNS/(run ID)/artifacts/<filename>` (the `output dir` declared in Resources). When a Plots step in this plan lists bare filenames like `foo.png`, that's the file *label* — the actual save path is `RUNS/(run ID)/artifacts/foo.png`. Never save plots under `REPORTS/`. Embed in the report with `![description](../RUNS/(run ID)/artifacts/foo.png)` — the leading `../` is required because the report lives in `REPORTS/`.
 
 ## Success metrics
 | Metric | Baseline | Target | How to measure |

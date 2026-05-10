@@ -146,11 +146,27 @@ Update STATE.md (see Section 5 for rules):
 - **Update SYNTHESIS.md** if: (1) paradigm shift this cycle, (2) a belief reached supported/rejected, or (3) 5+ runs since last update. If SYNTHESIS.md doesn't exist, create from template. Write for a human who hasn't followed the loop.
 - Update Meta (run count, date)
 
-### Phase 7: Check interrupts
+### Phase 7: Check interrupts, schedule continuation
 
-Evaluate all interrupt boundaries (Section 6). If any trigger → stop and report to human.
+**(a) Evaluate interrupt boundaries** (Section 6). If any trigger → stop and report to human.
 
-If clear → return to Phase 1.
+**(b) Schedule the next cycle.** Even when no interrupt fires, the loop should self-schedule a wakeup before yielding. This keeps progress trackable, lets the human interject between cycles, and survives session pauses. The default cadence is short — pick a delay that matches what's pending (e.g. ~60s when no external job is in flight; longer when a slow SLURM job or remote API is the bottleneck).
+
+Agent-specific:
+
+- **Claude Code, inside a `/loop` dynamic session** (the supervisor was started via `/loop run the research loop` with no interval): call the `ScheduleWakeup` tool at the end of every cycle. Pass the same `/loop` prompt verbatim so the next firing re-enters the supervisor at Phase 1. Choose `delaySeconds` based on what you're waiting on (60–270s if a job is about to settle; 1200–1800s if genuinely idle). Set `reason` to one short specific sentence (e.g. `"checking R042 SLURM job, ~5min remaining"`) — this is shown to the human as the tracking signal.
+- **Claude Code, NOT inside `/loop`**: continue to Phase 1 in the same turn. Do not invent a scheduling call.
+- **Codex**: use the OS scheduler via `at`. Codex has no `/loop` equivalent, so this is the parallel mechanism — `at` runs a fresh `codex exec` at the scheduled time, achieving the same "wake up later and resume" behavior.
+
+  ```bash
+  # Schedule next cycle in 30 minutes (adjust delay as needed)
+  echo "cd $(pwd) && codex exec --full-auto 'continue research loop — read STATE.md and proceed from Phase 1'" \
+      | at now + 30 minutes
+  ```
+
+  Requires `at` (Linux) or `atrun` enabled (macOS: `sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.atrun.plist`). If `at` is unavailable, fall back to continuing in the same session and note the limitation in STATE.md Scratch.
+
+**(c) Then return to Phase 1** (or yield, if you scheduled a deferred wakeup in step b).
 
 ---
 
@@ -273,7 +289,7 @@ Write your report to REPORTS/{RUN_ID}.md. The report must be HUMAN-READABLE — 
 - Start with a plain-language summary (what you did, what you found, what it means)
 - Put ALL data inline — numbers, tables, key values directly in the report. Do NOT just point to JSON files.
 - Use data from `RUNS/{RUN_ID}/metrics/` as the authoritative source for tables and plots
-- Generate visualizations. Save to `RUNS/{RUN_ID}/artifacts/`, embed with `![description](../RUNS/{RUN_ID}/artifacts/filename.png)` (relative from REPORTS/)
+- Generate visualizations. **All plots MUST be saved to `RUNS/{RUN_ID}/artifacts/<filename>`, never under `REPORTS/`.** When the plan lists bare filenames (e.g. `r101_loss.png`), prepend `RUNS/{RUN_ID}/artifacts/` — the plan's `output dir` is the authoritative destination, the bare filename is just a label. Embed with `![description](../RUNS/{RUN_ID}/artifacts/filename.png)` (the `../` is required because the report lives in `REPORTS/` and `RUNS/` is its sibling).
 - Include your analysis — why do the results look this way? What's the interpretation?
 - The structured sections (Signal, Verdict, etc.) come AFTER the human-readable content
 
@@ -300,8 +316,8 @@ Write your report to REPORTS/{RUN_ID}.md. The report must be HUMAN-READABLE — 
 (every important measurement)
 
 ### Visualizations
-(Generate plots. Embed them.)
-![description](RUNS/{RUN_ID}/artifacts/plot_name.png)
+(Generate plots. Embed them. Path is relative to REPORTS/{RUN_ID}.md, so use `../RUNS/...`.)
+![description](../RUNS/{RUN_ID}/artifacts/plot_name.png)
 
 ### Analysis
 (Interpret the results. Why do they look this way? What patterns do you see? What's surprising?)
@@ -433,7 +449,7 @@ On significant events (paradigm shift, belief resolved, every 5 runs), spawn a s
 
 The sub-agent reads `templates/WANDB_REPORTS.md` for the full spec. The supervisor passes: version number, project name, and latest run ID.
 
-Non-blocking — the loop continues regardless of Report generation.
+**Must run in background.** On Claude Code, this means `Task(..., run_in_background=True, ...)`; on Codex, spawn the sub-agent detached. Without that, the Task call blocks the supervisor and stalls the loop. The supervisor proceeds to Phase 1 of the next cycle immediately after spawning — it does not wait for the Report URL. The completion notification arrives later; record the URL in STATE.md Scratch and SYNTHESIS.md when it does.
 
 Track versions in STATE.md Scratch:
 ```

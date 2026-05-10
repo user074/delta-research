@@ -80,14 +80,20 @@ Record the URL in `SYNTHESIS.md` under a `## wandb Reports` section.
 
 **Claude Code:**
 ```
-Task(subagent_type="general-purpose", model="sonnet", prompt="
-  Read templates/WANDB_REPORTS.md for instructions.
-  VERSION={VERSION}, WANDB_PROJECT={PROJECT}, PROJECT_NAME={NAME}, LATEST_RUN={RUN}.
-  Generate the wandb Report now.
-")
+Task(
+  subagent_type="general-purpose",
+  model="sonnet",
+  run_in_background=True,
+  prompt="
+    Read templates/WANDB_REPORTS.md for instructions.
+    VERSION={VERSION}, WANDB_PROJECT={PROJECT}, PROJECT_NAME={NAME}, LATEST_RUN={RUN}.
+    Generate the wandb Report now.
+  ",
+)
 ```
-Runs in background — loop continues regardless.
 
-**Codex:** Spawn sub-agent with the same prompt.
+`run_in_background=True` is **required** — without it the Task call blocks the supervisor until the report finishes, defeating the point of a side-channel snapshot. The supervisor continues the loop immediately after spawning; it'll be notified when the sub-agent completes (do not poll). Pick up the report URL from the completion notification and append it to `SYNTHESIS.md → ## wandb Reports`.
+
+**Codex:** Spawn the sub-agent with the same prompt, also detached so the loop continues.
 
 **Other agents:** Execute inline if sub-agents aren't available, or skip.
