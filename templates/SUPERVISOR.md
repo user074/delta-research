@@ -35,7 +35,7 @@ Read `STATE.md`. Parse:
 - **Ledger**: history of completed runs
 - **Frontier**: ranked candidate deltas
 - **Policy**: interrupt boundaries
-- **Environment**: conda, paths, resources (pass to worker)
+- **Environment**: env manager + activation (conda / mamba / uv / venv / pixi), paths, resources (pass to worker)
 - **INFRA.md** (if exists): hardware profile, optimization playbook, storage topology (pass relevant sections to worker)
 
 Next run ID = highest Ledger run + 1 (or R001 if empty).
@@ -234,7 +234,7 @@ Before running any commands, activate the project environment:
 {ENV_SETUP}
 
 Verify the environment is correct before proceeding (e.g. `which python`, quick import check).
-If a package is missing, install it (`pip install <pkg>`). In SLURM mode, install on the login node into the target conda env — compute nodes load the same env.
+If a package is missing, install it using the project's env manager (`pip install <pkg>` inside an active conda/venv; `uv pip install <pkg>` or `uv add <pkg>` for uv projects; `pixi add <pkg>` for pixi). In SLURM mode, install on the login node into the target env — compute nodes mount the same filesystem and load the same env (verify `which python` resolves to the same absolute path on both).
 
 ## Hardware & Optimization
 

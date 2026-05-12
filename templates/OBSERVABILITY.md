@@ -466,7 +466,7 @@ Write `RUNS/{RUN_ID}/job.sh` using the INFRA.md submission template:
 - Set `#SBATCH --output={PROJECT_ROOT}/RUNS/{RUN_ID}/slurm-%j.out`
 - Add `cd {PROJECT_ROOT}` as the first command after the SBATCH header — this anchors all relative paths
 - Set `#SBATCH` directives from the plan's SLURM section (walltime, GPUs, memory, partition)
-- Use the **validated env activation** from INFRA.md Job Execution (not generic `conda activate`)
+- Use the **validated env activation** from INFRA.md Job Execution — must be the exact form proven by the SLURM test job, not a generic `conda activate <name>` or bare `source activate` (`.bashrc` is usually not sourced under sbatch). For conda use the absolute `source /<prefix>/etc/profile.d/conda.sh && conda activate <env>`; for uv/venv use `source /abs/path/.venv/bin/activate` (or prepend the venv's `bin/` to `PATH`); for pixi use `eval "$(pixi shell-hook --manifest-path /abs/path/pixi.toml)"`
 - Set wandb env vars: `WANDB_PROJECT`, `WANDB_MODE`, `WANDB_RUN_NAME`, `WANDB_DIR={PROJECT_ROOT}/RUNS/{RUN_ID}/wandb`
 - Launch command: `python {PROJECT_ROOT}/RUNS/{RUN_ID}/experiment.py`
 

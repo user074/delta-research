@@ -224,8 +224,12 @@
 
 ### Modules & Env
 - **available CUDA modules**: (from `module avail cuda` — e.g. `cuda/12.1, cuda/12.2, cuda/12.4`)
-- **standard module loads**: (e.g. `module load cuda/12.2 anaconda3`)
-- **conda env path**: (absolute, accessible from compute — e.g. `/opt/conda/envs/llm-ft`. The compute nodes mount the same filesystem, so installing on the login node is enough.)
+- **standard module loads**: (e.g. `module load cuda/12.2 anaconda3`, or `module load cuda/12.2` if using uv/venv with no system module for Python)
+- **env manager**: (conda | mamba | uv | venv | pixi | poetry | other)
+- **env path**: (absolute, accessible from compute — fill the variant that applies:
+  - conda/mamba env: e.g. `/opt/conda/envs/llm-ft`
+  - uv / venv: e.g. `/mnt/shared/$USER/my-project/.venv` (the directory containing `bin/activate`)
+  - The compute nodes must mount the same filesystem so installing/syncing on the login node is enough.)
 
 ### Storage Policy
 <!-- CRITICAL: clusters have multiple filesystems with different rules. The agent cannot
@@ -271,7 +275,13 @@
 cd (project_root)
 
 (module loads)
-(conda/venv activation)
+(env activation — exact form depends on env manager:
+  conda:  source /opt/conda/etc/profile.d/conda.sh && conda activate llm-ft
+  mamba:  source /opt/mamba/etc/profile.d/mamba.sh && mamba activate llm-ft
+  uv:     source /mnt/shared/$USER/my-project/.venv/bin/activate
+  venv:   source /mnt/shared/$USER/my-project/.venv/bin/activate
+  pixi:   eval "$(pixi shell-hook --manifest-path /path/to/pixi.toml)"
+)
 
 # wandb configuration (if enabled)
 export WANDB_PROJECT=(project)
@@ -294,13 +304,28 @@ export WANDB_DIR=(project_root)/RUNS/(run_id)/wandb
   <!-- All relative paths in job scripts (RUNS/, REPORTS/, scripts/) are resolved against this. -->
   <!-- Must be on a filesystem mounted on both login and compute nodes. -->
   <!-- Validated by the SLURM test job during init. -->
+- **env manager**: (conda | mamba | uv | venv | pixi | poetry | other)
 - **validated env activation**:
   <!-- Exact commands proven to work on compute nodes. -->
-  <!-- For SLURM: must use absolute conda path, correct module loads. -->
+  <!-- For SLURM: use absolute paths and correct module loads — never rely on shell init that only runs on login nodes (.bashrc may not be sourced under sbatch). -->
   <!-- Validated by the SLURM test job during init. -->
   ```bash
-  (e.g. module load cuda/12.2 anaconda3)
-  (e.g. /opt/conda/bin/conda activate llm-ft)
+  # Example A — conda (absolute path, no reliance on shell init):
+  module load cuda/12.2 anaconda3
+  source /opt/conda/etc/profile.d/conda.sh
+  conda activate llm-ft
+
+  # Example B — uv / plain venv (just source the activate script):
+  module load cuda/12.2
+  source /mnt/shared/$USER/my-project/.venv/bin/activate
+
+  # Example C — uv without activation (call the venv's python directly):
+  module load cuda/12.2
+  export PATH=/mnt/shared/$USER/my-project/.venv/bin:$PATH
+
+  # Example D — pixi:
+  module load cuda/12.2
+  eval "$(pixi shell-hook --manifest-path /mnt/shared/$USER/my-project/pixi.toml)"
   ```
 - **wandb mode**: (online | offline | disabled)
 - **wandb project**: (project name, or N/A)

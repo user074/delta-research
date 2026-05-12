@@ -15,7 +15,8 @@
 <!-- Managed by environment agent. Supervisor reads, does not modify directly. -->
 <!-- Workers use this to set up before executing. -->
 <!-- Detailed hardware profile and optimization playbook in INFRA.md -->
-- **conda/venv**: (activation command, e.g. `conda activate myenv`)
+- **env manager**: (conda | mamba | uv | venv | pixi | poetry | other)
+- **env activation**: (activation command, e.g. `conda activate myenv`, `source .venv/bin/activate`, `source /path/to/uv-env/bin/activate`)
 - **python**: (version)
 - **key packages**: (package versions that matter for reproducibility)
 - **gpu**: (GPU setup, e.g. `CUDA_VISIBLE_DEVICES=0,1,2,3`, or "N/A")

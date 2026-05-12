@@ -212,10 +212,16 @@ Rules for the research loop:
 
 ## Step 2: Environment setup
 
-Spawn an environment agent to handle setup. This is separate from the research loop — the supervisor does not manage conda, GPUs, or dependencies directly.
+Spawn an environment agent to handle setup. This is separate from the research loop — the supervisor does not manage the Python env, GPUs, or dependencies directly.
 
 The environment agent should:
-- Detect active conda/venv, confirm with human
+- Detect the active Python environment and which manager owns it, confirm with human. Supported managers:
+  - **conda / mamba**: `conda env list`, `echo $CONDA_PREFIX`, `mamba env list`
+  - **uv**: `which uv`, look for `pyproject.toml` + `uv.lock`, `.venv/` in project root, `echo $VIRTUAL_ENV`
+  - **plain venv**: `echo $VIRTUAL_ENV`, look for `.venv/bin/activate` or `venv/bin/activate`
+  - **pixi**: `which pixi`, look for `pixi.toml` / `pixi.lock`
+  - **poetry**: `which poetry`, look for `pyproject.toml` with `[tool.poetry]`
+  Record the manager (`conda` / `mamba` / `uv` / `venv` / `pixi` / `poetry`) and the exact activation command in STATE.md Environment and INFRA.md.
 - Check GPU availability if relevant (`nvidia-smi`). Record all available GPUs and set `CUDA_VISIBLE_DEVICES` to use all of them by default. Note the parallelism strategy (DataParallel, DistributedDataParallel, or independent runs per GPU).
 - Check CPU cores (`nproc` / `sysctl -n hw.ncpu`) and record in Environment. Workers use this to set parallelism (e.g. num_workers, joblib n_jobs).
 - Verify key dependencies are importable
@@ -260,7 +266,7 @@ After basic environment setup, create INFRA.md from `templates/INFRA.template.md
    echo "=== USER ACCOUNTS ===" && sacctmgr show user $USER format=user,account,defaultaccount -P 2>/dev/null
    echo "=== QOS ===" && sacctmgr show qos format=name,maxwall,maxtres,priority -P 2>/dev/null | head -20
    echo "=== FAIRSHARE ===" && sshare -U 2>/dev/null
-   echo "=== AVAILABLE MODULES ===" && module avail cuda anaconda3 2>&1 | head -30
+   echo "=== AVAILABLE MODULES ===" && module avail cuda anaconda3 python uv 2>&1 | head -40
    echo "=== LOADED MODULES ===" && module list 2>&1
    echo "=== HOME QUOTA ===" && quota -s 2>/dev/null
    echo "=== MOUNTED FILESYSTEMS ===" && df -hT 2>/dev/null | grep -iE "lustre|gpfs|nfs|panfs|beegfs|home|scratch|work"
@@ -298,7 +304,7 @@ After basic environment setup, create INFRA.md from `templates/INFRA.template.md
 4. **For remote clusters (can't run commands locally):**
    - Hand the probe block from step 3A to the human, ask them to run it on the cluster and paste back the output
    - Then conduct the same interview (steps 3B and 3C) — same questions, just no live probe
-   - Also confirm the project root path and conda env path explicitly, since you can't verify them locally
+   - Also confirm the project root path and env path (conda env / uv-or-venv `.venv` / pixi prefix) explicitly, since you can't verify them locally
 
 5. **Derive the Optimization Playbook:**
    Use these rules to fill each playbook section. The template (INFRA.template.md) has detailed comments for each — follow those for the full decision tree.
@@ -399,7 +405,7 @@ After basic environment setup, create INFRA.md from `templates/INFRA.template.md
 
 **SLURM test job (when scheduler != N/A):**
 
-Before committing to the SLURM setup, validate that experiments can actually run on compute nodes. This catches common issues (wrong conda path, missing modules, no GPU access) before they waste real experiment time.
+Before committing to the SLURM setup, validate that experiments can actually run on compute nodes. This catches common issues (wrong env activation path, missing modules, no GPU access, env not visible from compute filesystem) before they waste real experiment time.
 
 The test script emits DELTA markers so `scripts/wait_for_job.sh` is validated simultaneously.
 
@@ -566,7 +572,12 @@ The init agent should set `DELTA_STORAGE_PATHS` in the test job script as a colo
 
 **On failure:**
 - Read the full output — diagnose what failed
-- Common fixes: use absolute conda path (`/opt/conda/bin/conda activate ...`), different module version, set `WANDB_MODE=offline`
+- Common fixes by env manager:
+  - **conda/mamba**: use absolute path (`source /opt/conda/etc/profile.d/conda.sh && conda activate <env>`) — `conda activate` alone often fails under sbatch because `.bashrc` isn't sourced
+  - **uv / venv**: use absolute path to activate (`source /abs/path/.venv/bin/activate`) and confirm the venv lives on a filesystem mounted on compute nodes (NOT `/home` on some clusters). Alternatively prepend the venv's `bin/` to `PATH` and skip activation entirely
+  - **pixi**: `eval "$(pixi shell-hook --manifest-path /abs/path/pixi.toml)"`
+  - module mismatches: try a different cuda/python module version
+  - wandb network blocked: set `WANDB_MODE=offline`
 - Fix, regenerate, resubmit. Iterate until Phase 1 passes.
 - Phase 2 failures are informational — record issues but don't block init
 
@@ -601,19 +612,22 @@ The research loop runs shell commands (python scripts, data processing, etc.). C
       "Bash(python3:*)",
       "Bash(pip install:*)",
       "Bash(conda:*)",
+      "Bash(mamba:*)",
+      "Bash(uv:*)",
+      "Bash(source:*)",
       "Bash(mkdir:*)"
     ]
   }
 }
 ```
-For full autonomy (if the human agrees), use `"allow": ["Bash(*)"]`. The conda/venv env is the safety boundary.
+For full autonomy (if the human agrees), use `"allow": ["Bash(*)"]`. The active Python env (conda/uv/venv) is the safety boundary — package installs land there, not system-wide.
 
-**Codex** — runs in a sandboxed container by default, so permissions are less of a concern. Use `--full-auto` flag when launching. Ensure the container image has the right conda env and dependencies pre-installed, or let the agent install them.
+**Codex** — runs in a sandboxed container by default, so permissions are less of a concern. Use `--full-auto` flag when launching. Ensure the container image has the right Python env (conda/uv/venv) and dependencies pre-installed, or let the agent install them.
 
 **Other agents** — configure equivalent auto-approval for shell commands per the agent's docs.
 
 Ask the human which permission level they want before writing the config. Show them the options:
-1. **Scoped** (recommended): python, pip, conda, mkdir only
+1. **Scoped** (recommended): python, pip, uv, conda/mamba, source (for venv activation), mkdir only
 2. **Full autonomy**: all shell commands (`Bash(*)`)
 3. **Manual**: no auto-permissions, approve each command
 

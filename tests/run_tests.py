@@ -507,16 +507,28 @@ def validate_slurm_job(exp_path: Path, job_path: Path, plan_path: Path, infra_pa
             "Must load modules from INFRA.md"
         )
 
-        # Validated env activation (not generic conda activate)
-        has_validated_env = (
-            "/opt/conda" in job or
-            "conda activate /opt" in job or
-            "source /opt/conda" in job
+        # Validated env activation — accept any of the supported env managers
+        # (conda/mamba: absolute conda.sh or absolute conda binary;
+        #  uv/venv: source .../bin/activate or PATH=.../bin;
+        #  pixi: shell-hook)
+        has_conda_abs = (
+            "/opt/conda" in job
+            or "conda activate /" in job
+            or "source /" in job and "conda.sh" in job
+            or "/conda/bin/conda activate" in job
         )
+        has_venv_activate = (
+            "/bin/activate" in job  # uv or plain venv
+            or ".venv/bin/activate" in job
+        )
+        has_pixi = "pixi shell-hook" in job
+        has_validated_env = has_conda_abs or has_venv_activate or has_pixi
         r.check(
             "job.sh uses validated env activation",
             has_validated_env,
-            "Must use validated env path from INFRA.md, not generic 'conda activate'"
+            "Must use validated env path from INFRA.md — absolute conda activation, "
+            "source <abs>/.venv/bin/activate (uv/venv), or pixi shell-hook. "
+            "Not bare 'conda activate <name>'."
         )
 
         # wandb env vars
@@ -996,7 +1008,8 @@ REVIEW_PROMPTS = {
         "- experiment.py implements the plan's commands as Python code\n"
         "- experiment.py has try/except with delta_blocker on fatal errors\n"
         "- job.sh has correct SBATCH directives (partition, GPUs, walltime from plan)\n"
-        "- job.sh uses validated env activation from INFRA.md (not generic conda activate)\n"
+        "- job.sh uses validated env activation from INFRA.md (absolute conda activation, "
+        "uv/venv `source .../bin/activate`, or pixi shell-hook — never a bare `conda activate <name>`)\n"
         "- job.sh sets WANDB_PROJECT and WANDB_MODE env vars\n"
         "- job.sh output path includes run ID\n"
         "- job.sh launches the experiment.py\n\n"

@@ -43,7 +43,10 @@ cd your-project
 git clone https://github.com/user074/delta-research.git ./delta-research
 
 # 2. Activate your env, then start your agent
-conda activate your-env
+#    (use whichever env manager your project uses)
+conda activate your-env            # conda / mamba
+# source .venv/bin/activate        # uv / plain venv
+# uv venv && source .venv/bin/activate  # uv from scratch
 claude --dangerously-skip-permissions  # or: codex --yolo
 ```
 
