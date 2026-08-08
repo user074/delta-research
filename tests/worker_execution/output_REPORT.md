@@ -12,6 +12,10 @@ This run tested belief #3: duplicate-heavy distributions reduce sorting time due
 - **design implications adopted**: Measured comparison-sensitive controls and varied scale because the grounding review identified run structure and comparison count as competing mechanisms.
 - **review recommendation not adopted**: None.
 
+## Plan amendments
+
+None — the final live plan matched `PLAN.initial.md`; no outcome-dependent change was made.
+
 ## Method
 Using Python 3.10.10, I generated synthetic arrays inline with `random.seed(42)` and exact duplicate ratios of `0%`, `50%`, `80%`, and `95%`. For each size in `[1_000, 10_000, 100_000, 1_000_000, 5_000_000]`, I filled the duplicate fraction with `42.0`, filled the remainder with uniform random floats, shuffled the list, and timed `sorted(array)` for 5 repetitions with `time.perf_counter()`.
 

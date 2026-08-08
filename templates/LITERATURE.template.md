@@ -12,6 +12,13 @@ work already exists, and the recommended direction.)
 - **pre-review confidence**: (0–1)
 - **why this review is needed**: (decision or experiment it should ground)
 
+## Plan amendments
+
+<!-- Compare PLAN.initial.md with the final PLAN.md. State "None" if unchanged. -->
+| Version | Class | When | What changed | Why scope was preserved | Evidence seen first? |
+|---------|-------|------|--------------|-------------------------|----------------------|
+| (vN) | (A/B) | (timestamp) | (before → after) | (target/search/evidence standard retained) | (no, or exact evidence already seen) |
+
 ## Search protocol
 
 - **searched on**: (date)

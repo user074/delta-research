@@ -110,7 +110,9 @@ If Frontier is empty, regenerate:
 mkdir -p RUNS/R###/artifacts
 ```
 
-Write `RUNS/R###/PLAN.md` using `templates/PLAN.template.md` as structure.
+Write `RUNS/R###/PLAN.md` using `templates/PLAN.template.md` as structure. Before handing it to the worker, copy
+the exact initial bytes to `RUNS/R###/PLAN.initial.md`. `PLAN.initial.md` is the immutable preregistration snapshot;
+`PLAN.md` is the live execution plan and may receive controlled amendments under the policy below.
 
 Every plan must include `## Literature Grounding`:
 
@@ -159,7 +161,35 @@ Fill in:
 - Stop conditions: when to halt
 - Context: relevant beliefs, prior findings with specific numbers, data file paths
 
-The plan is **immutable** once handed to the worker. If it needs to change, the worker reports BLOCKER.
+#### Controlled plan amendments
+
+Plans are commitments, not brittle scripts. Preserve the initial scientific intent in `PLAN.initial.md`, while
+allowing the live `PLAN.md` to be repaired in the same run. A trivial bug must not force a new run.
+
+Classify a proposed change before making it:
+
+1. **Class A — worker-autonomous repair**: typographical errors; broken commands; stale but identity-equivalent
+   paths; import/API/version mismatches; serialization or schema bugs; logging/plot/report formatting; retry,
+   timeout, batching, worker-count, or memory adjustments; deterministic seed plumbing; and corrections to metric
+   implementation that retain the preregistered estimand and recompute every affected arm. The worker fixes these
+   directly, updates `PLAN.md`, increments `plan_version`, and appends an Amendment Log row. Continue the same run.
+2. **Class B — supervisor-approved, scope-preserving amendment**: an equivalent resource substitution, material
+   schedule/compute reallocation within the recorded budget, or a method change that preserves the target belief,
+   causal contrast, dataset/model family, primary endpoint, and success criterion. The worker emits
+   `AMENDMENT_NEEDED` with the proposed diff and evidence; the supervisor may amend the live plan and resume the
+   same worker/run. This is not automatically a BLOCKER and does not require human approval unless another
+   interrupt boundary applies.
+3. **Class C — scientific redesign**: changing the target belief, main causal estimand/intervention, primary
+   model or dataset family, primary endpoint or its success threshold after seeing outcomes, preregistered
+   prediction after outcome inspection, or budget/irreversibility boundary. Do not amend this into the current
+   run. Preserve the evidence gathered, write a BLOCKER or completed pilot report as appropriate, and create a
+   newly planned run. Obtain human input only when an interrupt boundary actually requires it.
+
+Every change to the live plan must be auditable: preserve `PLAN.initial.md`; append rather than rewrite the
+`## Amendment Log`; record timestamp, actor, class, issue/evidence, exact before → after change, and why the
+scientific interpretation is unchanged; and summarize amendments in the report. Never lower a target, swap the
+primary outcome, delete an arm, or revise a prediction because observed results are inconvenient. If a metric bug
+is repaired after partial execution, retain the raw outputs and recompute all comparable cells.
 
 ### Phase 4: Spawn worker
 
@@ -177,7 +207,7 @@ For all other types, assemble the Experiment Worker Prompt (Section 4A). Spawn o
 multi_agent = true
 
 [agents.worker]
-description = "Research worker: executes a single experiment plan, writes a structured report. Never modifies STATE.md or PLAN.md."
+description = "Research worker: executes one plan, fixes logged Class A execution bugs in live PLAN.md, writes a structured report, and never modifies STATE.md or PLAN.initial.md."
 ```
 
 ### Phase 5: Ingest report
@@ -191,6 +221,8 @@ Read `REPORTS/R###.md`. Extract:
 - Confounds
 - New hypotheses
 - Suggested next deltas
+- Plan amendments: version, repair class, why they were scope-preserving, and whether any result was observed
+  before each amendment
 - If this was a literature review: search coverage, evidence map, closest prior work, reusable assets, grounding
   verdict, recommended direction, and whether the empirical gate is open
 - Verify the durable archive exists at `LITERATURE/B###/R###/`, contains `REVIEW.md`, `queries.md`, `evidence.csv`,
@@ -227,8 +259,8 @@ authorization is absent, stop at `IRREVERSIBLE` before the first commit/push. Ne
 2. **Manage `.gitignore`**:
    - Ignore secrets, environment directories, caches, wandb internals, raw logs, checkpoints, generated model
      weights, and large transient outputs.
-   - Keep immutable plans, reports, source/scripts, lightweight structured metrics, and report-linked plots under
-     version control.
+   - Keep both the immutable initial plan and the final live plan, reports, source/scripts, lightweight structured
+     metrics, and report-linked plots under version control.
    - Inspect sizes before staging. Do not push files ≥100 MiB to ordinary GitHub Git; normally keep generated
      artifacts below 50 MiB, add run-specific ignore rules for larger reproducible outputs, and document their
      external/storage path in the report. Do not introduce Git LFS without explicit authorization.
@@ -236,7 +268,7 @@ authorization is absent, stop at `IRREVERSIBLE` before the first commit/push. Ne
    - Run relevant tests plus `git diff --check`.
    - Inspect `git diff --cached --stat`, `git diff --cached --name-only`, and the staged diff for secrets,
      accidental data, unrelated edits, and missing run artifacts.
-   - Required scope normally includes `RUNS/R###/PLAN.md`, run scripts and lightweight metrics/artifacts,
+   - Required scope normally includes `RUNS/R###/PLAN.initial.md`, `RUNS/R###/PLAN.md`, run scripts and lightweight metrics/artifacts,
      `REPORTS/R###.md`, literature archive + index for review runs, `STATE.md`, triggered `SYNTHESIS.md`, and any
      shared code/config/`.gitignore` intentionally changed by the run.
 4. **Use a non-default research branch**:
@@ -300,10 +332,12 @@ Agent-specific:
 - Re-run environment agent to update after hardware changes (new GPUs, moved to cluster, etc.)
 
 ### PLAN.md (per run)
-- **Owner**: Supervisor creates, Worker reads
-- **Immutable** during execution
-- Must specify exact resource paths (checkpoints, datasets, artifacts) — worker uses what's listed
-- If the plan can't be followed or a resource is missing, Worker reports BLOCKER
+- **Owner**: Supervisor creates the initial/live pair; Worker may edit only the live plan under Class A
+- `PLAN.initial.md` is the immutable preregistration snapshot; `PLAN.md` is the versioned, amendable execution plan
+- Must specify exact resource identities and paths; identity-equivalent path repairs are Class A, resource
+  substitutions are Class B or C depending on scientific impact
+- A plan problem triggers repair or `AMENDMENT_NEEDED` before BLOCKER; only Class C redesign or an interrupt
+  boundary requires ending the run
 
 ### REPORT.md (per run)
 - **Owner**: Worker creates, Supervisor reads
@@ -329,7 +363,8 @@ Agent-specific:
 
 ### Supervisor NEVER
 - Parses raw logs or debugs mid-run
-- Modifies a plan after handing it to a worker
+- Silently rewrites `PLAN.initial.md`, the Amendment Log, predictions, primary endpoints, or success thresholds
+- Forces a new run for a Class A repair that the worker can resolve locally
 - Skips state compression
 - Runs experiments directly (always spawn a worker)
 - Manages environment directly (spawn environment agent)
@@ -338,9 +373,9 @@ Agent-specific:
 
 ### Worker NEVER
 - Modifies STATE.md
-- Modifies PLAN.md
+- Modifies `PLAN.initial.md`, or changes `PLAN.md` outside the controlled amendment policy
 - Chooses new research directions (suggests only via "New hypotheses" and "Next tests" in report)
-- Uses resources not specified in the plan (wrong checkpoint, different dataset)
+- Silently substitutes a scientifically different checkpoint, dataset, intervention, or endpoint
 - Ignores stop conditions
 - Commits, pushes, changes branches, or edits `.gitignore`; Git publication belongs to the supervisor after state
   compression
@@ -377,9 +412,12 @@ If a package is missing, install it using the project's env manager (`pip instal
 ## Contract (strict)
 
 - NEVER modify STATE.md
-- NEVER modify PLAN.md
+- NEVER modify `PLAN.initial.md`. You MAY repair the live `PLAN.md` under the Controlled plan amendments policy:
+  fix Class A issues locally, increment `plan_version`, append the Amendment Log, and continue the same run.
+  For Class B, emit `AMENDMENT_NEEDED` with an exact proposed diff for supervisor approval. Class C is BLOCKER.
 - NEVER choose new research directions (suggest via "New hypotheses" and "Next tests" only)
-- ONLY use resources specified in the plan (checkpoints, datasets, artifacts). If a resource is missing or wrong, BLOCKER.
+- Use the resource identities specified in the live plan. Repair an identity-equivalent path locally; do not
+  silently substitute a different model, dataset, or intervention.
 - If any stop condition triggers, immediately report verdict = BLOCKER
 - Null results are valuable — report honestly
 - Verify the plan's `## Literature Grounding` cites a completed review for every target belief. Missing or pending
@@ -405,7 +443,10 @@ Follow the Hardware & Optimization playbook above. Specifically:
 
 **Smoke test before hero run** (when the plan has a `## Smoke Test` section): generate `experiment_smoke.py` + `job_smoke.sh` from the smoke config, submit to the fast-queue partition, validate VRAM and throughput, refine the hero walltime if needed. Only submit the hero run after the smoke passes. See OBSERVABILITY.md → Step 0.
 
-**Failure recovery is part of the run.** If a command fails or the SLURM job exits non-zero: read the logs, diagnose, attempt a fix, and re-run. Iterate up to 2-3 times. Only escalate to BLOCKER when the failure requires changing the plan or human input. See `templates/OBSERVABILITY.md` → Step 5 for SLURM-specific recovery patterns.
+**Failure recovery is part of the run.** If a command fails or the SLURM job exits non-zero: read the logs,
+diagnose, repair Class A issues in the live plan/code, and re-run. Iterate up to 2-3 times. Emit
+`AMENDMENT_NEEDED` for a Class B change. Escalate to BLOCKER only for Class C redesign, an exhausted repair, or a
+defined interrupt boundary. See `templates/OBSERVABILITY.md` → Step 5 for SLURM-specific recovery patterns.
 
 For both modes, follow `templates/OBSERVABILITY.md`:
 - Set up the run directory: `mkdir -p RUNS/{RUN_ID}/logs RUNS/{RUN_ID}/metrics RUNS/{RUN_ID}/artifacts`
@@ -491,15 +532,16 @@ Write your report to REPORTS/{RUN_ID}.md. The report must be HUMAN-READABLE — 
 ### 4B. Literature Review Worker Prompt Template
 
 > Use this prompt only when `PLAN.md` has `type: literature-review`. The review is a real run: it gets an R### ID,
-> immutable plan, report, Ledger row, and state compression, but it does not execute the proposed experiment.
+> preserved initial plan, amendable live plan, report, Ledger row, and state compression, but it does not execute
+> the proposed experiment.
 
 ```
 You are a research Worker executing one literature-grounding run: {RUN_ID}.
 
 ## Environment
 
-The project root and research state are available in the current workspace. Read the immutable plan and use only
-the target belief and search scope authorized there. Internet/database search is required unless the plan records
+The project root and research state are available in the current workspace. Read the preserved initial plan and
+the current live plan; use only the target belief and search scope authorized there. Internet/database search is required unless the plan records
 an offline constraint; if current search is impossible, write a BLOCKER report rather than relying on memory.
 
 ## Your plan
@@ -508,7 +550,8 @@ an offline constraint; if current search is impossible, write a BLOCKER report r
 
 ## Contract (strict)
 
-- NEVER modify STATE.md, SYNTHESIS.md, or PLAN.md.
+- NEVER modify STATE.md, SYNTHESIS.md, or `PLAN.initial.md`. Class A repairs to live `PLAN.md` are allowed and
+  must be versioned in its Amendment Log; Class B requires `AMENDMENT_NEEDED`; Class C is BLOCKER.
 - Review exactly one target hypothesis. Do not silently broaden or replace it.
 - Do not run the proposed empirical experiment. Small deterministic checks that only verify a paper, repository,
   dataset, or metric are allowed when the plan authorizes them.

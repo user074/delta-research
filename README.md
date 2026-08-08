@@ -37,6 +37,8 @@ flowchart LR
 - **Cluster probe + interview** — partitions, storage policy, fairshare
 - **Persistent CLAUDE.md/AGENTS.md rules** — loop discipline survives compaction
 - **Predictions in plans** — predicted vs actual in reports. Good for your brain's on-policy learning!
+- **Controlled plan amendments** — every run preserves `PLAN.initial.md`, while workers fix trivial execution
+  bugs in the live plan and record an audit trail instead of restarting the run
 - **Literature Grounding Gate** — every seed and future hypothesis gets its own primary-source review before an
   empirical run may target it
 - **Atomic GitHub publication** — after compression, each run is explicitly staged, committed on a research
@@ -87,7 +89,7 @@ The loop runs autonomously until it hits a budget, blocker, or asks you somethin
 | `REPORTS/R###.md` | Per-run experimental or literature review — evidence, method/data, verdict | Drilling into a result |
 | `LITERATURE/INDEX.md` | Per-belief grounding registry with current verdict/direction and archive links | Reviewing prior work and novelty |
 | `LITERATURE/B###/R###/` | Immutable full review, query log, evidence matrix, bibliography | Auditing or refreshing a review |
-| `RUNS/R###/` | Plan, logs, metrics, checkpoints, artifacts, scripts | Raw data |
+| `RUNS/R###/` | Initial/live plans with amendment log, logs, metrics, checkpoints, artifacts, scripts | Raw data and execution audit |
 | wandb dashboard | Live training metrics + cumulative versioned Reports | While experiments are running |
 
 ---
@@ -131,6 +133,12 @@ Only a grounded hypothesis is eligible for empirical testing. New hypotheses dis
 rule, so the loop cannot silently drift into an ungrounded direction.
 
 **Wrong is fine, stuck is not.** Rejecting a hypothesis is as valuable as confirming one. When a core belief is rejected (confidence drops ≥ 0.3), dependent beliefs are flagged for re-evaluation and the frontier is adjusted.
+
+**Plans are repairable, goals are not movable.** Each run preserves its original `PLAN.initial.md`. The worker can
+fix commands, paths, API mismatches, batching, logging, and other scope-preserving execution bugs in the live
+`PLAN.md`, with versioned Amendment Log entries. A supervisor can approve a larger but still scope-preserving
+amendment without restarting. Changing the hypothesis, causal contrast, primary endpoint/threshold, model or
+dataset family, or predictions after seeing outcomes requires a new run.
 
 **Smoke test first.** For non-trivial runs, the worker submits a 5-15 minute smoke test on the fast-queue partition before committing GPU-hours to the hero run. Catches OOM, missing paths, walltime underestimates, and precision bugs.
 

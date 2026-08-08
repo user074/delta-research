@@ -107,7 +107,7 @@ The file should contain:
   | `REPORTS/R###.md` | Per-run experimental or literature-review reports — full evidence, analysis, and verdict | Worker (write); supervisor (read in Phase 5) |
   | `LITERATURE/INDEX.md` | Per-belief grounding status, latest verdict/direction, and archive links | Supervisor (write during review-run compression) |
   | `LITERATURE/B###/R###/` | Immutable review, query log, evidence matrix, and bibliography for one review version | Literature worker (write); supervisor validates |
-  | `RUNS/R###/` | Per-run dir: `PLAN.md` (immutable), `experiment.py`, `job.sh`, `slurm-*.out`, `logs/`, `metrics/`, `checkpoints/`, `artifacts/`, `scripts/` | Supervisor writes PLAN.md; worker writes the rest |
+  | `RUNS/R###/` | Per-run dir: immutable `PLAN.initial.md`, amendable/versioned `PLAN.md`, execution files, logs, metrics, checkpoints, artifacts, and scripts | Supervisor creates both plans; worker may make logged Class A repairs to live PLAN.md |
 
   *When in doubt:*
   - Lost context after compaction? → re-read `STATE.md` (current state) + this CLAUDE.md/AGENTS.md (rules). For phase details, re-read `SUPERVISOR.md`.
@@ -119,17 +119,22 @@ The file should contain:
   **The 7 phases** (one cycle):
   1. Read STATE.md (beliefs, ledger, frontier)
   2. Enforce the Literature Grounding Gate, then select the highest-ranked eligible delta from Frontier
-  3. Write PLAN.md to `RUNS/R###/PLAN.md`
+  3. Write the live plan to `RUNS/R###/PLAN.md`, then preserve its exact initial bytes as
+     `RUNS/R###/PLAN.initial.md` before spawning the worker
   4. Spawn a worker with the plan
   5. Ingest the worker's REPORT.md
   6. Compress STATE.md (update beliefs, append ledger, refresh frontier, update SYNTHESIS.md if a paradigm shifted)
   7. Loop back to phase 1
 
   **Hard contracts** (do not break these):
-  - Workers NEVER modify STATE.md or PLAN.md
-  - Plans are IMMUTABLE once created — no edits between create and execute
+  - Workers NEVER modify STATE.md or `PLAN.initial.md`
+  - Live `PLAN.md` supports controlled amendments: workers fix and log trivial Class A execution bugs; Class B
+    scope-preserving changes need supervisor approval; Class C scientific redesign gets a new run
+  - Never revise hypotheses, primary endpoints/thresholds, or predictions in response to observed outcomes
   - Workers suggest new directions ONLY via the report's "New hypotheses" and "Next tests" sections
-  - Workers use ONLY resources specified in the plan's Resources section. If a resource is missing → BLOCKER.
+  - Workers use the resource identities specified in the live plan. A stale identity-equivalent path/API is a
+    logged Class A repair; a scope-preserving substitution requires `AMENDMENT_NEEDED`; a scientifically different
+    resource is Class C and requires a new run. Use BLOCKER only after the applicable repair path is exhausted.
   - Every belief starts with Literature `pending`; its dedicated literature-review run must complete before any
     empirical, analysis, exploration, or engineering delta may target it
   - Every future hypothesis added during compression also starts `pending` and immediately receives a literature-

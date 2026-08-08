@@ -570,7 +570,8 @@ def validate_plan(plan_path: Path, state_path: Path) -> TestResult:
     section_names = set(sections.keys())
 
     # Required sections
-    for required in ["Delta", "Literature Grounding", "Resources", "Commands", "Success metrics", "Stop conditions", "Context", "Meta"]:
+    for required in ["Delta", "Literature Grounding", "Resources", "Commands", "Success metrics", "Stop conditions",
+                     "Context", "Amendment policy", "Amendment Log", "Meta"]:
         found = any(required.lower() in s.lower() for s in section_names)
         r.check(f"Has section: {required}", found)
 
@@ -645,8 +646,8 @@ def validate_report(report_path: Path) -> TestResult:
     section_names_lower = {s.lower() for s in sections.keys()}
 
     # Required sections
-    for required in ["Summary", "Motivation", "Literature grounding", "Method", "Results", "Signal", "Verdict",
-                      "Confounds", "New hypotheses", "Next tests", "Meta"]:
+    for required in ["Summary", "Motivation", "Literature grounding", "Plan amendments", "Method", "Results",
+                     "Signal", "Verdict", "Confounds", "New hypotheses", "Next tests", "Meta"]:
         found = any(required.lower() in s for s in section_names_lower)
         r.check(f"Has section: {required}", found)
 
@@ -728,13 +729,14 @@ def validate_report(report_path: Path) -> TestResult:
 # ---------------------------------------------------------------------------
 
 def validate_framework_contracts() -> TestResult:
-    r = TestResult("Framework Contracts (Literature + GitHub)")
+    r = TestResult("Framework Contracts (Plans + Literature + GitHub)")
     templates = ROOT / "templates"
     supervisor = (templates / "SUPERVISOR.md").read_text()
     state = (templates / "STATE.template.md").read_text()
     plan = (templates / "PLAN.template.md").read_text()
     report = (templates / "REPORT.template.md").read_text()
     init = (templates / "INIT.md").read_text()
+    observability = (templates / "OBSERVABILITY.md").read_text()
     literature_path = templates / "LITERATURE.template.md"
     literature_index_path = templates / "LITERATURE_INDEX.template.md"
 
@@ -783,6 +785,25 @@ def validate_framework_contracts() -> TestResult:
             "do not force-push" in supervisor)
     r.check("Initialization records publication authorization",
             "GitHub publication authorization" in init)
+
+    r.check("Supervisor preserves initial and live plans",
+            "PLAN.initial.md" in supervisor and "Controlled plan amendments" in supervisor)
+    r.check("Observability layout preserves both plans",
+            "PLAN.initial.md" in observability and "PLAN.md" in observability)
+    r.check("Class A permits worker-autonomous repair",
+            "Class A — worker-autonomous repair" in supervisor and "Continue the same run" in supervisor)
+    r.check("Class B resumes the same run after approval",
+            "AMENDMENT_NEEDED" in supervisor
+            and ("resume the same" in supervisor.lower() or "same worker/run" in supervisor.lower()))
+    r.check("Class C protects scientific commitments",
+            "Class C — scientific redesign" in supervisor and "primary endpoint" in supervisor
+            and "observed results" in supervisor)
+    r.check("Plan template has versioned amendment audit",
+            "## Amendment policy" in plan and "## Amendment Log" in plan and "plan_version" in plan)
+    r.check("Report templates disclose plan amendments",
+            "## Plan amendments" in report and "## Plan amendments" in literature)
+    r.check("Initialization teaches controlled resource repair",
+            "identity-equivalent path/API" in init and "AMENDMENT_NEEDED" in init)
 
     return r
 
@@ -999,7 +1020,7 @@ REVIEW_PROMPTS = {
         "Evaluate the output against the template and supervisor rules. Report:\n\n"
         "## Compliance\n"
         "For each requirement below, say PASS or FAIL with a one-line reason:\n"
-        "- All template sections present (Delta, Literature Grounding, Resources, Commands, Success metrics, Stop conditions, Context, Meta)\n"
+        "- All template sections present (Delta, Literature Grounding, Resources, Commands, Success metrics, Stop conditions, Context, Amendment policy, Amendment Log, Meta)\n"
         "- Empirical plan cites the exact completed literature-review report for each target belief\n"
         "- Delta targets the most uncertain belief(s) (confidence nearest 0.5)\n"
         "- Bandit reasoning: does it show awareness of uncertainty, info gain, and feasibility?\n"
@@ -1029,7 +1050,7 @@ REVIEW_PROMPTS = {
         "Evaluate the output against the template and worker contract. Report:\n\n"
         "## Compliance\n"
         "For each requirement below, say PASS or FAIL with a one-line reason:\n"
-        "- All template sections present (Summary, Motivation, Literature grounding, Method, Results/Data/Visualizations/Analysis, "
+        "- All template sections present (Summary, Motivation, Literature grounding, Plan amendments, Method, Results/Data/Visualizations/Analysis, "
         "Signal, Verdict, Confounds, New hypotheses, Next tests, Artifacts, Meta)\n"
         "- Summary is concise and self-contained (a researcher could understand what happened)\n"
         "- Data is inline — actual numbers in tables, not just pointers to files\n"
@@ -1154,7 +1175,7 @@ PROMPTS = {
         "and section 3 (Contracts) for rules.\n\n"
         "Read the plan template at {plan_template} — your output MUST use this exact structure "
         "with these exact section headings: Delta, Literature Grounding, Resources, Commands, Success metrics, "
-        "Stop conditions, Context, Meta.\n\n"
+        "Stop conditions, Context, Amendment policy, Amendment Log, Meta.\n\n"
         "Read the current state from {input}.\n\n"
         "Generate a plan for the next run following Phase 2 (Select delta) and Phase 3 (Create run) rules:\n"
         "- Use bandit reasoning: assess Uncertainty, Info gain, Feasibility for candidates\n"
@@ -1171,7 +1192,7 @@ PROMPTS = {
         "Read {supervisor} section 4 (Worker Prompt Template) for the contract and rules.\n\n"
         "Read the report template at {report_template} — your output MUST use this exact structure "
         "with these exact section headings in this order: "
-        "Summary, Motivation, Literature grounding, Method, Results (with sub-sections Data, Visualizations, Analysis), "
+        "Summary, Motivation, Literature grounding, Plan amendments, Method, Results (with sub-sections Data, Visualizations, Analysis), "
         "Signal, Verdict, Confounds, New hypotheses, Next tests, Artifacts, Meta.\n\n"
         "CRITICAL: Use the EXACT section headings from the template. Do not rename, reorder, "
         "or use alternative headings. The supervisor parses these by name.\n\n"

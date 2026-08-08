@@ -13,6 +13,13 @@
 - **design implications adopted**: (methods, controls, baselines, assets, or scope taken from the review)
 - **review recommendation not adopted**: (anything deliberately changed, with rationale)
 
+## Plan amendments
+
+<!-- Compare PLAN.initial.md with the final PLAN.md. State "None" if unchanged. -->
+| Version | Class | When | What changed | Why scope was preserved | Outcomes seen first? |
+|---------|-------|------|--------------|-------------------------|----------------------|
+| (vN) | (A/B) | (timestamp) | (before → after) | (scientific invariants retained) | (no, or exact data already seen) |
+
 ## Method
 (What was done, step by step — enough detail that a human could reproduce)
 
