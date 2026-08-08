@@ -25,11 +25,11 @@
 
 ## BeliefState
 
-| # | Parent | Belief | Status | Confidence | Key evidence | Last updated |
-|---|--------|--------|--------|------------|--------------|--------------|
-| 1 | — | Timsort's advantage over quicksort grows with nearly-sorted data | active | 0.7 | R001: 3.2x faster on 90%-sorted arrays (1M elements) | 2026-02-21 |
-| 2 | — | Memory allocation is the dominant cost for large arrays (>1M), not comparisons | active | 0.5 | R002: inconclusive — alloc time noisy, need better isolation | 2026-02-22 |
-| 3 | — | Duplicate-heavy distributions reduce sorting time due to equal-element optimizations | active | 0.45 | seed — untested | 2026-02-20 |
+| # | Parent | Belief | Status | Confidence | Literature | Key evidence | Last updated |
+|---|--------|--------|--------|------------|------------|--------------|--------------|
+| 1 | — | Timsort's advantage over quicksort grows with nearly-sorted data | active | 0.7 | grounded (R000, 2026-02-20) | R001: 3.2x faster on 90%-sorted arrays (1M elements) | 2026-02-21 |
+| 2 | — | Memory allocation is the dominant cost for large arrays (>1M), not comparisons | active | 0.5 | grounded (R000, 2026-02-20) | R002: inconclusive — alloc time noisy, need better isolation | 2026-02-22 |
+| 3 | — | Duplicate-heavy distributions reduce sorting time due to equal-element optimizations | active | 0.45 | pending | seed — untested | 2026-02-20 |
 
 ## Ledger
 
@@ -42,8 +42,9 @@
 
 | Rank | Delta | Target | Uncertainty | Info gain | Feasibility | Rationale | Blocked by |
 |------|-------|--------|-------------|-----------|-------------|-----------|------------|
-| 1 | Benchmark sorting on arrays with 50%, 80%, 95% duplicate ratios across sizes 1K-10M | #3 | high | high | high | Direct test of duplicate optimization — if time drops with more duplicates, belief supported; if flat, contradicted | — |
-| 2 | Isolate alloc cost by pre-allocating output buffer and comparing with/without for random 1M-10M arrays | #2 | high | med | med | R002 failed because alloc measurement was noisy. Pre-allocation removes alloc entirely — if sort time barely changes, alloc was dominant | — |
+| 1 | Isolate alloc cost by pre-allocating output buffer and comparing with/without for random 1M-10M arrays | #2 | high | med | med | R002 failed because alloc measurement was noisy. Belief #2 is grounded and eligible. | — |
+| 2 | Literature review: duplicate-heavy distributions and Timsort equal-element optimizations | #3 | high | high | high | Belief #3 is pending and must be grounded before its benchmark can run | — |
+| 3 | Benchmark sorting on arrays with 50%, 80%, 95% duplicate ratios across sizes 1K-10M | #3 | high | high | high | Direct empirical test after grounding | Literature review for #3 |
 
 ## Policy
 
@@ -61,6 +62,7 @@
 ### Constraints
 - One major delta per run
 - Worker must not modify STATE.md or choose directions
+- Every new hypothesis begins Literature=pending and must be reviewed before empirical testing
 
 ## Scratch
 - R002 had high variance in alloc measurements — might need to pin CPU frequency or use median of 50+ trials

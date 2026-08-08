@@ -4,7 +4,24 @@
 - **what**: (what to change or test — be specific about the analysis, not just "run X")
 - **intent**: (why — what we hope to learn, what question this answers)
 - **target belief**: #N — (the belief(s) this should discriminate, can target multiple)
-- **type**: (experiment | analysis | exploration | refactor)
+- **type**: (literature-review | experiment | analysis | exploration | refactor)
+
+## Literature Grounding
+
+<!-- REQUIRED for every run.
+     Literature-review run: status=pending; this run grounds exactly one belief. Fill search scope fields.
+     Other run: status=grounded; cite the exact REPORTS/R###.md review and its design implications. -->
+- **status before run**: (pending | grounded | refresh-needed)
+- **target belief**: #N — (exact wording from BeliefState)
+- **review artifact**: (this run | `REPORTS/R###.md`)
+- **grounding implications**: (for empirical runs, what prior evidence changed in the design)
+
+<!-- Required only for type=literature-review. Remove these fields for an empirical run. -->
+- **search questions**: (direct evidence, mechanism/alternatives, methods/failures, novelty)
+- **query families**: (exact planned query families; worker records exact strings used)
+- **required counterevidence**: (strongest null/negative/boundary-condition evidence to seek)
+- **implementation scan**: (official code, data, metrics, prompts, checkpoints, baselines to find)
+- **coverage standard**: (primary-source expectations and acceptable stopping rule; do not pad sparse fields)
 
 ## Resources
 <!-- Exact paths. Worker uses ONLY these — no assumptions, no substitutions. -->
@@ -18,6 +35,8 @@
 - **launch**: (from INFRA.md — e.g. `torchrun --nproc_per_node=4`)
 - **scratch path**: (from INFRA.md Storage — fast path for intermediates)
 - **execution mode**: (direct | slurm — from INFRA.md Job Execution)
+- **literature access**: (for literature-review runs: authorized databases/search engines and source policy; otherwise N/A)
+- **literature archive**: (for literature-review runs: `LITERATURE/B###/R###/`; otherwise cited archive or N/A)
 
 <!-- Include this section only when execution mode is slurm -->
 ## SLURM

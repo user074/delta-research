@@ -27,7 +27,7 @@ Let the human confirm, correct, or add what's missing. Ask about what they've tr
 
 **Round 2 — Hypotheses** (dig deeper based on round 1):
 Ask the human to list their hypotheses one by one. Do not dump all questions at once.
-- What do you think is true but haven't proven? (these become seed beliefs)
+- What do you think is true but haven't proven? (these become seed beliefs with Literature `pending`)
 - What are the competing explanations? (these shape the frontier)
 - What would change your mind? (this defines what "discriminating" means)
 
@@ -75,6 +75,8 @@ The file should contain:
 - **Research loop** section:
   - Research question and goals (from interview)
   - Key constraints (from interview)
+  - Mandatory literature gate: every seed or future hypothesis receives its own literature-review run before an
+    empirical run may target it
   - How to run: `To continue research, say: "run the research loop"`
 
 - **Reference: where to find what** (lookup table — agents should consult this when they need a spec, not guess):
@@ -90,6 +92,8 @@ The file should contain:
   | `delta-research/templates/STATE.template.md` | Structure of STATE.md | When seeding STATE.md from scratch |
   | `delta-research/templates/PLAN.template.md` | Structure of PLAN.md (Delta, Resources, SLURM, Commands, Predictions, Success metrics, Stop conditions, Context, Meta) | When writing a plan in Phase 3 |
   | `delta-research/templates/REPORT.template.md` | Structure of REPORT.md (Summary, Method, Results with predicted-vs-actual, Signal, Verdict, Confounds, New hypotheses, Next tests, Meta) | When the worker is writing a report |
+  | `delta-research/templates/LITERATURE.template.md` | Dedicated one-hypothesis literature-review report: reproducible search protocol, evidence map, contrary work, novelty, reusable assets, and direction recommendation | When a belief is `pending` or `refresh-needed`; must precede empirical testing |
+  | `delta-research/templates/LITERATURE_INDEX.template.md` | Durable registry linking beliefs to their latest versioned review archive and run report | When initializing literature storage or ingesting a review |
   | `delta-research/templates/INFRA.template.md` | Structure of INFRA.md (compute, optimization playbook, storage, cluster, job execution) | When (re)building INFRA.md |
   | `delta-research/scripts/wait_for_job.sh` | Blocking SLURM monitor — tails output for DELTA markers, exits on DONE/BLOCKER, has FIFO read + 30s safety net | Use it directly via `bash scripts/wait_for_job.sh <JOB_ID> <OUTPUT_FILE>`. Never reimplement. |
 
@@ -100,7 +104,9 @@ The file should contain:
   | `STATE.md` | Current beliefs, ledger, frontier, environment. **Read first in any research conversation.** | Supervisor (read+write). Workers never touch. |
   | `INFRA.md` | Hardware profile, optimization playbook, storage paths, cluster config, validated env activation | Init agent (write); supervisor + workers (read) |
   | `SYNTHESIS.md` | Human-facing narrative — what we've learned and where we are | Supervisor (write at paradigm shift / belief resolution) |
-  | `REPORTS/R###.md` | Per-run reports — full data, plots, analysis, verdict | Worker (write); supervisor (read in Phase 5) |
+  | `REPORTS/R###.md` | Per-run experimental or literature-review reports — full evidence, analysis, and verdict | Worker (write); supervisor (read in Phase 5) |
+  | `LITERATURE/INDEX.md` | Per-belief grounding status, latest verdict/direction, and archive links | Supervisor (write during review-run compression) |
+  | `LITERATURE/B###/R###/` | Immutable review, query log, evidence matrix, and bibliography for one review version | Literature worker (write); supervisor validates |
   | `RUNS/R###/` | Per-run dir: `PLAN.md` (immutable), `experiment.py`, `job.sh`, `slurm-*.out`, `logs/`, `metrics/`, `checkpoints/`, `artifacts/`, `scripts/` | Supervisor writes PLAN.md; worker writes the rest |
 
   *When in doubt:*
@@ -112,7 +118,7 @@ The file should contain:
 
   **The 7 phases** (one cycle):
   1. Read STATE.md (beliefs, ledger, frontier)
-  2. Select the highest-ranked delta from Frontier
+  2. Enforce the Literature Grounding Gate, then select the highest-ranked eligible delta from Frontier
   3. Write PLAN.md to `RUNS/R###/PLAN.md`
   4. Spawn a worker with the plan
   5. Ingest the worker's REPORT.md
@@ -124,18 +130,30 @@ The file should contain:
   - Plans are IMMUTABLE once created — no edits between create and execute
   - Workers suggest new directions ONLY via the report's "New hypotheses" and "Next tests" sections
   - Workers use ONLY resources specified in the plan's Resources section. If a resource is missing → BLOCKER.
+  - Every belief starts with Literature `pending`; its dedicated literature-review run must complete before any
+    empirical, analysis, exploration, or engineering delta may target it
+  - Every future hypothesis added during compression also starts `pending` and immediately receives a literature-
+    review frontier entry
+  - A materially reframed hypothesis becomes `refresh-needed` and must be reviewed again
 
-  **A run is atomic — phases 3–6 are one unit. The cycle ends at Phase 6, NOT at Phase 4.**
+  **A run is atomic — phases 3–6b are one unit. The cycle ends after the pushed Phase 6b commit, NOT at Phase 4 or state compression alone.**
   Once a plan is approved (Phase 2), launch the worker. Don't ask for permission between submit/wait/sync/report. After the worker writes `REPORTS/R###.md`, you (the supervisor) must immediately, in the same turn:
   1. **Phase 5 — Ingest the report.** Read `REPORTS/R###.md`. Pull out the signal, verdict, numbers, new hypotheses.
   2. **Phase 6 — Compress STATE.md.** Append the Ledger row. Update belief confidences. Refresh the Frontier. Update SYNTHESIS.md if a belief resolved or paradigm shifted. Spawn the wandb Report sub-agent if a trigger fires (paradigm shift, belief resolution, every 5 runs — see WANDB_REPORTS.md). The wandb sub-agent runs in the background and does NOT block this phase.
-  3. Then either continue to Phase 1 of the next cycle, or stop **only** at an interrupt boundary.
+  3. **Phase 6b — Publish.** Curate `.gitignore`, explicitly stage only the run scope, validate, commit on the
+     research branch, push, and verify the remote-tracking branch.
+  4. Then either continue to Phase 1 of the next cycle, or stop **only** at an interrupt boundary.
+
+  **Git publication is Phase 6b and part of the atomic run.** After compression, the supervisor inspects the
+  run-scoped diff, updates `.gitignore`, stages explicit paths only, validates, commits on a non-default research
+  branch, pushes, and verifies the remote-tracking branch. The cycle is not complete and the next cycle cannot
+  start until this succeeds. Never use blanket `git add` or force-push.
 
   **"The experiment succeeded" is NOT a stopping condition.** Neither is "the worker wrote the report." A cycle that ends with REPORT.md written but STATE.md unchanged is a half-done cycle — the loop has lost memory of what just happened. The supervisor's job isn't done until STATE.md reflects the new run. The expected shape of every cycle is: *plan → worker executes → worker analyzes + visualizes + writes REPORT.md → supervisor ingests → supervisor updates STATE.md/SYNTHESIS.md → either continue or hit an interrupt boundary*. The only valid stops are the interrupt boundaries below — never mid-cycle.
 
   **Smoke test before hero run**: For any non-trivial run (training, long benchmarks, anything >30 min), run the plan's `## Smoke Test` first — short walltime, fast-queue partition, 1 GPU, small data slice. Use it to validate paths, VRAM headroom, throughput, and refine the hero walltime estimate. A failed 4-hour run wastes 4 hours of compute *and* queue time. Skip only for runs <10 min, deterministic non-GPU analyses, or a near-identical config that succeeded in the last 24 hours. See OBSERVABILITY.md Step 0 for the procedure.
 
-  **SLURM is one unit**: `sbatch` → `bash scripts/wait_for_job.sh ${JOB_ID} {OUTPUT_FILE}` → `wandb sync` (if offline) → write REPORT.md → **Phase 5 (ingest) → Phase 6 (compress STATE.md)**. No breaks. The moment `wait_for_job.sh` returns, do NOT yield — keep going through Phases 5 and 6 in the same turn. Do NOT manually poll `squeue` — `wait_for_job.sh` handles monitoring with FIFO-based reading and a 30s safety net.
+  **SLURM is one unit**: `sbatch` → `bash scripts/wait_for_job.sh ${JOB_ID} {OUTPUT_FILE}` → `wandb sync` (if offline) → write REPORT.md → **Phase 5 (ingest) → Phase 6 (compress STATE.md) → Phase 6b (commit + push + verify)**. No breaks. The moment `wait_for_job.sh` returns, do NOT yield — keep going through Phase 6b in the same turn. Do NOT manually poll `squeue` — `wait_for_job.sh` handles monitoring with FIFO-based reading and a 30s safety net.
 
   **Failure recovery is part of the run**: If a run hits DELTA-BLOCKER, non-zero exit, or missing output: read logs, diagnose (env issue, OOM, code bug, missing path), fix, re-run. Iterate up to 2-3 times. Only escalate to BLOCKER when the failure is truly unfixable without human input.
 
@@ -151,9 +169,12 @@ The file should contain:
   **State compression after each run** (Phase 6):
   - Append one row to STATE.md Ledger: `| R### | <delta> | <signal> | <verdict> | #N | [link](REPORTS/R###.md) |`
   - Update affected beliefs' confidence based on verdict + signal
-  - Add new beliefs from "New hypotheses" (confidence 0.5)
-  - Refresh Frontier — remove completed delta, add candidates from "Next tests"
+  - Add new beliefs from "New hypotheses" (confidence 0.5, Literature `pending`)
+  - After a valid literature review, mark only its exact target belief `grounded (R###, date)`
+  - Refresh Frontier — remove completed delta; add mandatory literature-review entries before empirical candidates
   - Update SYNTHESIS.md narrative if a paradigm shifted or a belief resolved
+  - Phase 6b: curate `.gitignore`, stage only confirmed run files, commit the atomic run, push the configured
+    research branch, and verify it reached the remote
 
   **Schedule the next cycle at end of Phase 7** (so the loop is trackable and survives session pauses):
   - **Claude Code in a `/loop` session**: call `ScheduleWakeup` with the same `/loop` prompt, picking `delaySeconds` based on what's pending (60–270s if waiting on a job to settle, 1200–1800s if idle). Set `reason` to one specific sentence — that's the human's tracking signal.
@@ -203,8 +224,8 @@ Rules for the research loop:
 - Do NOT emit user-facing progress messages between cycles. No "here's what I found so far." No "completed R003, ready for next pass."
 - Do NOT treat "substantial progress" as a reason to yield control. The interrupt boundaries in STATE.md Policy are the ONLY valid reasons to stop.
 - "Keep experiments short" means each experiment is fast to execute. It does NOT mean "run one cycle and stop." Short experiments = more cycles per session, not fewer.
-- **A cycle ends at Phase 6 (STATE.md compressed), not at Phase 4 (worker done) or Phase 5 (report read).** When the worker finishes writing REPORTS/R###.md, immediately ingest it (Phase 5), update STATE.md and SYNTHESIS.md (Phase 6) in the same turn, then return to Phase 1 — do not stop in between. "The experiment succeeded" is not a stopping condition.
-- After updating STATE.md (Phase 6), go directly back to reading STATE.md (Phase 1). Do not produce any output between these steps.
+- **A cycle ends after Phase 6b is pushed and verified, not at Phase 4 (worker done), Phase 5 (report read), or Phase 6 (state compressed).** When the worker finishes, immediately ingest, compress, curate/stage/validate, commit, push, and verify in the same turn. "The experiment succeeded" and "STATE.md is updated" are not stopping conditions.
+- After updating STATE.md (Phase 6), go directly through Phase 6b, then back to Phase 1. Do not produce user-facing output between these steps.
 - The only time you talk to the human is when an interrupt boundary fires.
 ```
 
@@ -631,13 +652,28 @@ Ask the human which permission level they want before writing the config. Show t
 2. **Full autonomy**: all shell commands (`Bash(*)`)
 3. **Manual**: no auto-permissions, approve each command
 
+### GitHub publication authorization
+
+Separately ask whether the loop is authorized to stage, commit, and push after every completed run. These are
+distinct external-write actions; record the answer in STATE.md Environment and CLAUDE.md/AGENTS.md. If authorized:
+
+- Inspect `git remote -v`, current/default branches, working-tree status, and GitHub authentication.
+- Configure a non-default research branch (for example `research-loop`) for run commits. Do not commit run work
+  directly to the default branch.
+- Record the exact remote and research branch in STATE.md.
+- Add the Phase 6b contract from `SUPERVISOR.md` to agent instructions: explicit path staging, `.gitignore` curation,
+  test/diff/secret/size checks, atomic run commit, push and verification, no force-push.
+- If authorization is declined or manual, Phase 6b stops at `IRREVERSIBLE` and asks before each commit/push.
+
 ---
 
 ## Step 4: Create project structure
 
 ```
-mkdir -p REPORTS RUNS
+mkdir -p REPORTS RUNS LITERATURE
 ```
+
+Create `LITERATURE/INDEX.md` from `templates/LITERATURE_INDEX.template.md`, with one pending row per seed belief.
 
 ---
 
@@ -646,7 +682,9 @@ mkdir -p REPORTS RUNS
 Use `templates/STATE.template.md` as structure. Fill in from the interview:
 - Project name, goal, date
 - Seed beliefs from the human's hypotheses (confidence 0.5)
-- Initial frontier: deltas that would discriminate between competing hypotheses
+- Mark every seed belief Literature `pending`
+- Initial frontier: for each belief, place a dedicated literature-review delta before and as the blocker for the
+  empirical delta that would discriminate it
 - Policy: budget, interrupt thresholds
 - Environment section populated by environment agent
 - INFRA.md populated by environment agent (detailed hardware profile and optimization playbook — STATE.md Environment stays minimal)
@@ -657,6 +695,9 @@ Also create initial SYNTHESIS.md from templates/SYNTHESIS.template.md with proje
 
 ## Step 6: Confirm with human
 
-Show STATE.md and the written CLAUDE.md/AGENTS.md. Are the seed beliefs right? Is the frontier targeting the right questions? Anything missing from the environment setup? Are permissions configured correctly?
+Show STATE.md and the written CLAUDE.md/AGENTS.md. Are the seed beliefs right? Do the literature-review rounds ask
+the right grounding questions before each empirical delta? Is the frontier targeting the right questions?
+Anything missing from the environment setup? Are permissions configured correctly? Is the Git remote/research
+branch correct, and is the recorded commit/push authorization accurate?
 
 Once confirmed, tell the human: *"To start the research loop, say: run the research loop"*. The agent will then read `templates/SUPERVISOR.md` and begin cycling.

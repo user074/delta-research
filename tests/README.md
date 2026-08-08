@@ -13,6 +13,7 @@ Modular tests for each stage of the loop. Each test has sample inputs and instru
 - Does the plan have multiple analysis steps (not just "run a script")?
 - Does it specify exact resources (checkpoint paths, dataset paths)?
 - Does it target the most uncertain belief (#2, confidence 0.5)?
+- Does an empirical plan cite the completed literature-review report for its grounded target belief?
 - Does it include rich context with specific numbers from prior runs?
 - Does it define what would support vs contradict?
 
@@ -25,6 +26,7 @@ Modular tests for each stage of the loop. Each test has sample inputs and instru
 
 **Check**:
 - Does the report start with a human-readable Summary + Motivation?
+- Does it record the literature grounding artifact and design implications?
 - Is all data inline (numbers in tables, not just "see JSON")?
 - Are there visualizations embedded with `![](path)`?
 - Is there an Analysis section interpreting the results?
@@ -42,7 +44,8 @@ Modular tests for each stage of the loop. Each test has sample inputs and instru
 - Did belief #2 confidence increase (report supports it)?
 - Was the completed delta removed from Frontier?
 - Were new beliefs added from the report's "New hypotheses" section?
-- Were new deltas added to Frontier for the new beliefs?
+- Did every new belief start with Literature `pending`?
+- Was a literature-review delta added ahead of empirical deltas for every new belief?
 - Did Meta update (total_runs, last_updated)?
 
 ## Comparing agent policies
@@ -53,3 +56,14 @@ diff tests/state_compression/output_STATE_after.md tests/state_compression/outpu
 ```
 
 This lets you see how policy changes affect state transitions without running a full experiment.
+
+## Framework contract test
+
+Run:
+
+```bash
+python tests/run_tests.py --test contracts
+```
+
+This validates the mandatory one-hypothesis Literature Grounding Gate, durable `LITERATURE/B###/R###/` archive,
+and Phase 6b GitHub commit/push rules without invoking an agent or network operation.

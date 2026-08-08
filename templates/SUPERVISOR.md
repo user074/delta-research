@@ -11,10 +11,13 @@
 ## 1. Principles
 
 1. **Delta-first** — The unit of progress is *what changed → what happened → what it means*.
-2. **Bisect the hypothesis space** — A good delta splits uncertain beliefs in two. Even negative results are progress if they eliminate a direction.
-3. **Compression over narration** — STATE.md holds structured tables, not prose. Compress after every run.
-4. **Autonomy with crisp interrupts** — Default is *keep going*. Stop only on defined boundaries.
-5. **Single source of truth** — STATE.md is memory. Reports are the detailed record. SYNTHESIS.md is the human-facing interpretation. Everything else is derived.
+2. **Ground before testing** — Every hypothesis receives its own literature-review run before an empirical run may target it. Prior work should sharpen, redirect, or retire weak ideas before compute is spent.
+3. **Bisect the hypothesis space** — A good delta splits uncertain beliefs in two. Even negative results are progress if they eliminate a direction.
+4. **Compression over narration** — STATE.md holds structured tables, not prose. Compress after every run.
+5. **Autonomy with crisp interrupts** — Default is *keep going*. Stop only on defined boundaries.
+6. **Single source of truth** — STATE.md is memory. Reports are the detailed record. SYNTHESIS.md is the human-facing interpretation. Everything else is derived.
+7. **One run, one published commit** — A cycle is not durable until its run-scoped files, state compression, and
+   `.gitignore` updates are committed atomically and pushed to the configured research branch.
 
 ---
 
@@ -31,18 +34,59 @@ The human has already authorized the loop by telling you to run it.
 ### Phase 1: Read state
 
 Read `STATE.md`. Parse:
-- **BeliefState**: current beliefs, confidence, status
+- **BeliefState**: current beliefs, confidence, status, and literature-grounding status
 - **Ledger**: history of completed runs
 - **Frontier**: ranked candidate deltas
 - **Policy**: interrupt boundaries
 - **Environment**: env manager + activation (conda / mamba / uv / venv / pixi), paths, resources (pass to worker)
 - **INFRA.md** (if exists): hardware profile, optimization playbook, storage topology (pass relevant sections to worker)
+- **Git state**: remote URL, current/default/research branches, upstream, and working-tree status. Record the
+  pre-run HEAD. Confirm GitHub authentication/read access before expensive work. Never let unrelated dirty files
+  leak into a run commit.
 
 Next run ID = highest Ledger run + 1 (or R001 if empty).
 
 ### Phase 2: Select delta
 
 Pick the top-ranked non-blocked Frontier entry.
+
+#### Mandatory Literature Grounding Gate
+
+Every belief must have a `Literature` value in BeliefState:
+
+- `pending` — no dedicated review has grounded the exact hypothesis wording
+- `grounded (R###, YYYY-MM-DD)` — a completed literature-review run covers this exact hypothesis
+- `refresh-needed` — the hypothesis changed materially or the review is no longer current enough for the decision
+
+If the column is absent in an older STATE.md, add it at the next compression and treat every belief without a
+linked review artifact as `pending`. Project experiments, intuition, or a few citations in Scratch do not satisfy
+the gate.
+
+**Eligibility rule:** an empirical, analysis, exploration, or engineering delta may target a belief only when its
+Literature value is `grounded (...)`. If it is `pending` or `refresh-needed`, the only eligible next delta for that
+belief is a `literature-review` run. The supervisor must create or promote that review entry ahead of empirical
+entries targeting the same belief.
+
+Each literature-review run grounds exactly one hypothesis. Closely related beliefs may share sources, but each
+still gets its own review round and report so its evidence, novelty, and direction are independently auditable.
+When the wording or causal mechanism of a belief changes materially, mark it `refresh-needed`; cosmetic wording
+changes do not reopen the gate.
+
+A literature-review run must answer:
+
+1. What primary evidence directly supports or contradicts this hypothesis?
+2. What adjacent evidence changes its plausibility without testing it directly?
+3. What is the closest prior work, and is the proposed contribution still novel?
+4. Which methods, datasets, metrics, checkpoints, prompts, or official code should be reused?
+5. What known failure modes, negative results, or alternative explanations should change the experiment?
+6. Should the hypothesis be kept, narrowed, reframed, deprioritized, or dropped?
+
+Literature runs require current internet/database search unless an explicit offline constraint creates a BLOCKER.
+Prioritize primary sources (papers and official project/code pages); use reviews or surveys to discover primary
+work, not as the sole support for technical claims. Include the strongest contrary evidence and distinguish
+direct evidence from adjacent analogy and speculation. Record search date, query families, inclusion criteria,
+coverage limits, stable links/DOIs/arXiv IDs, and official code/data links. Do not pad a sparse literature with
+irrelevant citations.
 
 **Bandit reasoning** — for each candidate delta, assess three dimensions:
 
@@ -55,6 +99,7 @@ Record all three in the Frontier table. Use judgment to rank — dimensions make
 If Frontier is empty, regenerate:
 - Find beliefs with confidence 0.3–0.7 (active, uncertain)
 - If all beliefs are resolved (supported/rejected), derive new ones: what follow-up questions do the resolved beliefs raise? Add them to BeliefState at 0.5.
+- For every new or ungrounded belief, add its one-belief literature-review delta before any empirical delta
 - Design deltas that would bisect uncertain beliefs: "if result is X, belief goes up; if Y, belief goes down"
 - Rank by expected discrimination
 - If no useful deltas possible AND no new beliefs can be derived → `AMBIGUITY` interrupt
@@ -66,6 +111,16 @@ mkdir -p RUNS/R###/artifacts
 ```
 
 Write `RUNS/R###/PLAN.md` using `templates/PLAN.template.md` as structure.
+
+Every plan must include `## Literature Grounding`:
+
+- For a `literature-review` run, name the one target belief, its exact wording, search questions, query families,
+  required counterevidence, implementation/code scan, and coverage standard. Use
+  `templates/LITERATURE.template.md` for the report. Literature runs do not need GPU allocation, smoke tests, or
+  plots unless the review includes a genuine quantitative meta-analysis. Declare the immutable archive path
+  `LITERATURE/B###/R###/` in Resources.
+- For every other run type, cite the exact grounding report `REPORTS/R###.md`, summarize how it changed the
+  design, and verify the target belief's Literature value is grounded. Missing grounding is a plan-time BLOCKER.
 
 **A good plan is substantive.** Each run is expensive — maximize information extracted per run. A plan should:
 - Have **multiple analysis steps** that build on each other (not just "run a script")
@@ -97,6 +152,7 @@ Write `RUNS/R###/PLAN.md` using `templates/PLAN.template.md` as structure.
 
 Fill in:
 - Delta: what to change, why, what belief(s) it targets
+- Literature Grounding: this run's review protocol, or the prior grounding report and design implications
 - Commands: detailed step-by-step analysis (multiple steps, not a single command)
 - Resources: exact paths to checkpoints, data, prior artifacts (from STATE.md Environment + prior runs). Include `execution mode: direct | slurm` (from INFRA.md Job Execution)
 - Success metrics: what to measure, with baselines and targets
@@ -107,7 +163,8 @@ The plan is **immutable** once handed to the worker. If it needs to change, the 
 
 ### Phase 4: Spawn worker
 
-Assemble the worker prompt (see Section 4) with the plan content and spawn a worker.
+Read the plan's Delta type. For `literature-review`, assemble the Literature Review Worker Prompt (Section 4B).
+For all other types, assemble the Experiment Worker Prompt (Section 4A). Spawn one worker.
 
 **Agent-specific spawning:**
 - **Claude Code**: `Task(subagent_type="general-purpose", model="sonnet",prompt=<worker prompt>)`
@@ -134,6 +191,11 @@ Read `REPORTS/R###.md`. Extract:
 - Confounds
 - New hypotheses
 - Suggested next deltas
+- If this was a literature review: search coverage, evidence map, closest prior work, reusable assets, grounding
+  verdict, recommended direction, and whether the empirical gate is open
+- Verify the durable archive exists at `LITERATURE/B###/R###/`, contains `REVIEW.md`, `queries.md`, `evidence.csv`,
+  and `sources.bib` (or a complete linked-source fallback), and that `REVIEW.md` is byte-identical to
+  `REPORTS/R###.md`
 
 ### Phase 6: Compress state
 
@@ -141,14 +203,67 @@ Update STATE.md (see Section 5 for rules):
 - Append to Ledger
 - Update BeliefState confidence and status based on the evidence
 - Add new beliefs from report
+- If this was a literature review, set the exact target belief to `grounded (R###, date)` after verifying the
+  report satisfies the literature contract; otherwise leave it pending and treat the report as BLOCKER/unclear
+- Update `LITERATURE/INDEX.md` for the target belief with the exact hypothesis, latest review, date, evidence
+  verdict, recommended direction, archive path, and run-report path. Initialize it from
+  `templates/LITERATURE_INDEX.template.md` if absent. Never overwrite prior review directories.
 - Update Frontier: remove completed delta, consider adding suggested next deltas
 - Check for paradigm shift (Section 5): if any belief was rejected or dropped ≥0.3, cascade to children
 - **Update SYNTHESIS.md** if: (1) paradigm shift this cycle, (2) a belief reached supported/rejected, or (3) 5+ runs since last update. If SYNTHESIS.md doesn't exist, create from template. Write for a human who hasn't followed the loop.
 - Update Meta (run count, date)
 
+#### Phase 6b: Curate, commit, and push the completed run
+
+Phase 6b is mandatory for every completed experimental or literature-review run. Human authorization to commit
+and push must be recorded in project instructions or obtained explicitly; initialization should ask for it. If
+authorization is absent, stop at `IRREVERSIBLE` before the first commit/push. Never infer permission to publish.
+
+1. **Inspect scope before staging**:
+   - Run `git status --short`, inspect unstaged diffs, and compare with the pre-run HEAD.
+   - Identify the exact files produced or intentionally changed by this run. Preserve unrelated human/agent work.
+   - Never use `git add .`, `git add -A`, or `git add --all`. Stage explicit confirmed paths with
+     `git add -- <path...>`.
+2. **Manage `.gitignore`**:
+   - Ignore secrets, environment directories, caches, wandb internals, raw logs, checkpoints, generated model
+     weights, and large transient outputs.
+   - Keep immutable plans, reports, source/scripts, lightweight structured metrics, and report-linked plots under
+     version control.
+   - Inspect sizes before staging. Do not push files ≥100 MiB to ordinary GitHub Git; normally keep generated
+     artifacts below 50 MiB, add run-specific ignore rules for larger reproducible outputs, and document their
+     external/storage path in the report. Do not introduce Git LFS without explicit authorization.
+3. **Validate the candidate commit**:
+   - Run relevant tests plus `git diff --check`.
+   - Inspect `git diff --cached --stat`, `git diff --cached --name-only`, and the staged diff for secrets,
+     accidental data, unrelated edits, and missing run artifacts.
+   - Required scope normally includes `RUNS/R###/PLAN.md`, run scripts and lightweight metrics/artifacts,
+     `REPORTS/R###.md`, literature archive + index for review runs, `STATE.md`, triggered `SYNTHESIS.md`, and any
+     shared code/config/`.gitignore` intentionally changed by the run.
+4. **Use a non-default research branch**:
+   - If currently on the repository's default branch, create/switch to the configured research branch before the
+     commit. Do not commit run work directly to the default branch.
+   - Reuse the existing research branch on later cycles; never force-push or rewrite published run history.
+5. **Commit atomically**:
+   - Experimental/analysis run: `research(R###): <concise delta>`
+   - Literature run: `literature(R###): ground belief #N`
+   - One completed run should map to one primary commit containing plan → execution evidence → report → state
+     compression. Do not create empty commits.
+6. **Push and verify**:
+   - Push the exact current branch to the configured remote, setting upstream on first push:
+     `git push -u <remote> HEAD` (later `git push`).
+   - Verify local HEAD equals the remote-tracking branch after push and record the commit hash in the user-facing
+     interrupt/final summary when the loop eventually stops.
+   - Retry a transient push failure up to 2–3 times after diagnosis. Authentication failure, non-fast-forward
+     requiring a merge/rebase decision, branch protection, missing remote, or repeated network failure is a
+     `BLOCKER`; do not force-push.
+
+**The cycle is not complete until Phase 6b succeeds.** Do not start the next plan, emit a between-cycle summary,
+or schedule continuation while the completed run exists only locally.
+
 ### Phase 7: Check interrupts, schedule continuation
 
-**(a) Evaluate interrupt boundaries** (Section 6). If any trigger → stop and report to human.
+**(a) Confirm Phase 6b succeeded, then evaluate interrupt boundaries** (Section 6). If any trigger → stop and
+report to human. A local-only completed run is a BLOCKER, not a successful cycle boundary.
 
 **(b) Schedule the next cycle.** Even when no interrupt fires, the loop should self-schedule a wakeup before yielding. This keeps progress trackable, lets the human interject between cycles, and survives session pauses. The default cadence is short — pick a delay that matches what's pending (e.g. ~60s when no external job is in flight; longer when a slow SLURM job or remote API is the bottleneck).
 
@@ -192,10 +307,19 @@ Agent-specific:
 
 ### REPORT.md (per run)
 - **Owner**: Worker creates, Supervisor reads
-- Must follow `templates/REPORT.template.md` structure
+- Experimental runs follow `templates/REPORT.template.md`; literature-review runs follow
+  `templates/LITERATURE.template.md`
 - **Must be human-readable** — a researcher should understand what happened by reading just the report
 - All data inline — numbers, tables, key outputs in the report itself, not just pointers to JSON files
-- Visualizations embedded with `![description](path)` — generate plots for any numerical results
+- Visualizations embedded with `![description](path)` — generate plots for numerical experimental results;
+  literature reviews may use a structured evidence table without a plot
+
+### LITERATURE archive
+- **Worker**: writes versioned review files under `LITERATURE/B###/R###/`
+- **Supervisor**: validates the archive and updates `LITERATURE/INDEX.md` during compression
+- `REVIEW.md` must be byte-identical to `REPORTS/R###.md`; Git stores identical content as one blob
+- `queries.md`, `evidence.csv`, and `sources.bib` preserve reproducible search and machine-readable grounding
+- Reviews are immutable. Refreshes create a new run subdirectory and update the index; never overwrite history.
 
 ### SYNTHESIS.md
 - **Owner**: Supervisor
@@ -209,6 +333,8 @@ Agent-specific:
 - Skips state compression
 - Runs experiments directly (always spawn a worker)
 - Manages environment directly (spawn environment agent)
+- Stages unrelated files, uses blanket `git add`, force-pushes, or starts another run before the previous run's
+  commit is verified on the remote
 
 ### Worker NEVER
 - Modifies STATE.md
@@ -216,10 +342,14 @@ Agent-specific:
 - Chooses new research directions (suggests only via "New hypotheses" and "Next tests" in report)
 - Uses resources not specified in the plan (wrong checkpoint, different dataset)
 - Ignores stop conditions
+- Commits, pushes, changes branches, or edits `.gitignore`; Git publication belongs to the supervisor after state
+  compression
 
 ---
 
-## 4. Worker Prompt Template
+## 4. Worker Prompt Templates
+
+### 4A. Experiment Worker Prompt Template
 
 > Supervisor fills `{PLAN_CONTENT}`, `{RUN_ID}`, `{ENV_SETUP}`, and `{INFRA_PLAYBOOK}` before spawning.
 > `{ENV_SETUP}` comes from the Environment section of STATE.md.
@@ -252,6 +382,8 @@ If a package is missing, install it using the project's env manager (`pip instal
 - ONLY use resources specified in the plan (checkpoints, datasets, artifacts). If a resource is missing or wrong, BLOCKER.
 - If any stop condition triggers, immediately report verdict = BLOCKER
 - Null results are valuable — report honestly
+- Verify the plan's `## Literature Grounding` cites a completed review for every target belief. Missing or pending
+  grounding is a BLOCKER; do not begin the experiment.
 
 ## Hardware utilization
 
@@ -356,6 +488,68 @@ Write your report to REPORTS/{RUN_ID}.md. The report must be HUMAN-READABLE — 
 - **wandb_run**: (wandb run URL, if applicable)
 ```
 
+### 4B. Literature Review Worker Prompt Template
+
+> Use this prompt only when `PLAN.md` has `type: literature-review`. The review is a real run: it gets an R### ID,
+> immutable plan, report, Ledger row, and state compression, but it does not execute the proposed experiment.
+
+```
+You are a research Worker executing one literature-grounding run: {RUN_ID}.
+
+## Environment
+
+The project root and research state are available in the current workspace. Read the immutable plan and use only
+the target belief and search scope authorized there. Internet/database search is required unless the plan records
+an offline constraint; if current search is impossible, write a BLOCKER report rather than relying on memory.
+
+## Your plan
+
+{PLAN_CONTENT}
+
+## Contract (strict)
+
+- NEVER modify STATE.md, SYNTHESIS.md, or PLAN.md.
+- Review exactly one target hypothesis. Do not silently broaden or replace it.
+- Do not run the proposed empirical experiment. Small deterministic checks that only verify a paper, repository,
+  dataset, or metric are allowed when the plan authorizes them.
+- Search multiple query families: exact hypothesis/phenomenon, proposed mechanism, and methodological or failure-
+  mode terms. Follow citation trails in both directions for the key sources.
+- Prioritize primary sources and official code/data. A survey can organize the field, but trace decisive claims to
+  original papers. Read enough methods/results to assess what was actually tested; abstracts alone are not enough
+  for key evidence.
+- Seek and report the strongest contrary or null evidence. Distinguish direct tests, adjacent evidence, conceptual
+  analogy, and speculation.
+- Record search date, databases/search engines, exact query strings, inclusion/exclusion criteria, and coverage
+  limits. Usually include at least five relevant primary sources when the field contains them; document sparse
+  literature rather than padding the count.
+- Give stable direct citations (DOI, arXiv, publisher/conference page, or official repository URL) for every key
+  claim. Never cite a search-results page.
+- Identify reusable official code, data, measures, prompts, checkpoints, baselines, and evaluation protocols.
+- End with an actionable direction: keep, narrow, reframe, deprioritize, or drop the hypothesis, and explain how
+  the first empirical plan should change.
+- New hypotheses may be suggested only in the report. Each will enter STATE.md as literature=pending and require
+  its own future review round.
+
+## Output
+
+Write the full review using `templates/LITERATURE.template.md` exactly to both:
+
+- `REPORTS/{RUN_ID}.md`
+- `LITERATURE/B{BELIEF_ID_PADDED}/{RUN_ID}/REVIEW.md`
+
+The two files must be byte-identical. Also write:
+
+- `LITERATURE/B{BELIEF_ID_PADDED}/{RUN_ID}/queries.md` — exact query log, database/search engine, date, result
+  screening, and inclusion/exclusion notes
+- `LITERATURE/B{BELIEF_ID_PADDED}/{RUN_ID}/evidence.csv` — one row per included source with citation, stable URL,
+  source type, relationship, tested claim, finding, limitations, and code/data URL
+- `LITERATURE/B{BELIEF_ID_PADDED}/{RUN_ID}/sources.bib` — BibTeX where available; if BibTeX is unavailable, store
+  a complete linked citation list in this file and state the fallback format at the top
+
+Put the evidence map and source list inline in the review as well, so it remains independently auditable. Save
+optional plots or auxiliary extraction artifacts under `RUNS/{RUN_ID}/artifacts/` and list them in the review.
+```
+
 ---
 
 ## 5. State Compression Rules
@@ -370,7 +564,8 @@ Append one row:
 ```
 
 ### BeliefState — update existing
-If the BeliefState table lacks a Parent column, treat all beliefs as root. Add the column on the next compression.
+If the BeliefState table lacks a Parent column, treat all beliefs as root. If it lacks a Literature column, treat
+beliefs without a dedicated linked review as pending. Add both columns on the next compression.
 
 Read the report's verdict and evidence. Judge:
 - **supports + discriminating**: meaningful increase in confidence
@@ -386,21 +581,38 @@ Update status:
 
 Use your judgment on magnitude. The point is directional accuracy, not false precision.
 
+For a completed literature-review run:
+
+- Verify it followed `templates/LITERATURE.template.md` and contains a reproducible search protocol, primary-
+  evidence map, contrary evidence, novelty/gap analysis, implementation guidance, and direction recommendation.
+- If adequate, set Literature to `grounded (R###, YYYY-MM-DD)` for that exact belief. If inadequate or search was
+  blocked, keep `pending`/`refresh-needed` and add a corrective literature-review delta.
+- Literature is evidence and may update confidence, but label it `[literature R###]` in Key evidence so it is not
+  confused with project-generated evidence. Calibrate the update to directness, methodological quality,
+  independence, and match to the exact claim.
+- Verify the versioned literature archive is complete and `REVIEW.md` is byte-identical to the run report; update
+  `LITERATURE/INDEX.md`. Missing or divergent archive files keep the literature gate closed.
+- Apply the review's direction recommendation to the Frontier. A `drop` recommendation does not automatically
+  reject a belief; use the evidence and standard confidence rules. A material reframe creates a new pending belief.
+
 ### BeliefState — add new beliefs
 
 **This is critical for keeping the loop alive.** After updating existing beliefs, ask:
 
-1. **Did the worker report new hypotheses?** Check the "New hypotheses" section of the report. Add any well-reasoned ones as new beliefs at confidence 0.5.
-2. **Did a resolved belief open new questions?** When a belief reaches supported/rejected, the answer often raises deeper questions. Example: belief "A outperforms B" reaches 0.85 → add new belief "A outperforms B because of factor X" at 0.5.
+1. **Did the worker report new hypotheses?** Check the "New hypotheses" section of the report. Add any well-reasoned ones as new beliefs at confidence 0.5 and Literature `pending`.
+2. **Did a resolved belief open new questions?** When a belief reaches supported/rejected, the answer often raises deeper questions. Example: belief "A outperforms B" reaches 0.85 → add new belief "A outperforms B because of factor X" at 0.5 and Literature `pending`.
 3. **Did something unexpected show up?** Anomalies, confounds, or surprising observations in the report may suggest hypotheses nobody considered at init time.
 
 The belief space should grow as you learn, not just shrink. If all beliefs are resolved and no new ones are emerging, the research question may be answered — or the agent is not looking deep enough.
 
 ### Frontier
 - Remove the completed delta
-- **Add deltas targeting new beliefs** — every new belief should have at least one candidate delta
+- **Add literature-review deltas for new beliefs first** — every new belief gets one dedicated review round, ranked
+  ahead of empirical deltas targeting it
+- Add empirical deltas targeting new beliefs only as blocked entries until their Literature status is grounded
 - Review the report's "Next tests" — add any that would discriminate on uncertain beliefs
 - Re-rank: assess Uncertainty, Info gain, Feasibility for each delta. Prioritize high-uncertainty targets with high info-gain.
+- Never select an empirical entry whose target belief is `pending` or `refresh-needed`, even if its rank is highest
 - If Frontier lacks scoring dimension columns, add them on next compression.
 - For beliefs that have accumulated multiple null results: consider whether the belief is testable, or needs reformulation
 
@@ -423,6 +635,7 @@ After updating beliefs and before updating Frontier, check for cascading impact:
 ### Meta
 - Increment `total_runs`
 - Update `last_updated`
+- Phase 6b then commits and pushes this compressed state with the complete run scope
 
 ---
 
@@ -432,7 +645,7 @@ After updating beliefs and before updating Frontier, check for cascading impact:
 |----------|-----------|--------|
 | `BUDGET` | Cumulative time exceeds policy max | Stop. Report what was learned. |
 | `NULL_STREAK` | N consecutive null-signal runs | Stop. The current approach isn't producing discrimination. Suggest new direction. |
-| `BLOCKER` | Worker returns BLOCKER | Stop. Present details. |
+| `BLOCKER` | Worker returns BLOCKER, or Phase 6b cannot safely commit/push after recovery attempts | Stop. Present details; for Git failures include branch, local commit if any, remote, and exact error. Never force-push. |
 | `AMBIGUITY` | Frontier empty AND can't regenerate | Stop. Ask human for new hypotheses. |
 | `IRREVERSIBLE` | Next delta requires irreversible action | Pause. Get human approval. |
 

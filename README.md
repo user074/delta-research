@@ -4,19 +4,25 @@
 
 **Compatible with what you already have.** No rewrites, no new infra. Works on top of your existing scripts and however you already submit jobs.
 
-**Human steers, agent codes.** You own the hypotheses and the direction. The agent designs runs, writes scripts, debugs failures, and updates the belief table. You stay in flow — less coding, more thinking.
+**Human steers, agent codes.** You own the hypotheses and the direction. The agent grounds every hypothesis in a
+dedicated literature-review round, then designs runs, writes scripts, debugs failures, and updates the belief
+table. You stay in flow — less coding, more thinking.
 
 **Hands-off execution.** The agent monitors experiments, parallelizes GPU utilization, smoke-tests before hero runs, and recovers from common failures. You read `SYNTHESIS.md` when you want to check in.
 
 
 ```mermaid
 flowchart LR
-    S[STATE.md<br/>beliefs · ledger · frontier] --> P[Pick highest-value delta<br/>uncertainty × info-gain × feasibility]
+    S[STATE.md<br/>beliefs · literature status · ledger · frontier] --> G{Hypothesis grounded?}
+    G -- no --> L[Literature-review run<br/>evidence · novelty · better direction]
+    L --> C
+    G -- yes --> P[Pick highest-value empirical delta<br/>uncertainty × info-gain × feasibility]
     P --> PL[PLAN.md<br/>predictions · metrics · smoke test]
     PL --> W[Worker<br/>direct shell or SLURM sbatch]
     W --> R[REPORT.md<br/>data · plots · verdict]
     R --> C[Compress<br/>update beliefs · refresh frontier]
-    C --> S
+    C --> V[Curate gitignore<br/>commit atomic run · push]
+    V --> S
 ```
 
 ---
@@ -31,6 +37,10 @@ flowchart LR
 - **Cluster probe + interview** — partitions, storage policy, fairshare
 - **Persistent CLAUDE.md/AGENTS.md rules** — loop discipline survives compaction
 - **Predictions in plans** — predicted vs actual in reports. Good for your brain's on-policy learning!
+- **Literature Grounding Gate** — every seed and future hypothesis gets its own primary-source review before an
+  empirical run may target it
+- **Atomic GitHub publication** — after compression, each run is explicitly staged, committed on a research
+  branch, pushed, and verified before the next cycle starts
 - **Reference repo discovery** — reuse existing scaffolds, don't rebuild
 
 ---
@@ -74,7 +84,9 @@ The loop runs autonomously until it hits a budget, blocker, or asks you somethin
 |------|----------|--------------|
 | `SYNTHESIS.md` | Plain-language summary: current beliefs, recent findings, what's next | **Start here** |
 | `STATE.md` | Belief table with confidences, run ledger, experiment frontier | When you want exact numbers |
-| `REPORTS/R###.md` | Per-experiment report — method, data, plots, verdict | Drilling into a result |
+| `REPORTS/R###.md` | Per-run experimental or literature review — evidence, method/data, verdict | Drilling into a result |
+| `LITERATURE/INDEX.md` | Per-belief grounding registry with current verdict/direction and archive links | Reviewing prior work and novelty |
+| `LITERATURE/B###/R###/` | Immutable full review, query log, evidence matrix, bibliography | Auditing or refreshing a review |
 | `RUNS/R###/` | Plan, logs, metrics, checkpoints, artifacts, scripts | Raw data |
 | wandb dashboard | Live training metrics + cumulative versioned Reports | While experiments are running |
 
@@ -100,16 +112,23 @@ What's better than hands-off 72 hours and let agent do its thing?
 A "delta" is one experiment: *what changed → what happened → what it means*. The loop has 7 phases:
 
 1. **Read** STATE.md (current beliefs, ledger, frontier)
-2. **Select** the highest-value delta (uncertainty × info-gain × feasibility)
+2. **Ground + select** — if the target hypothesis is ungrounded, run its dedicated literature review first;
+   otherwise select the highest-value empirical delta (uncertainty × info-gain × feasibility)
 3. **Plan** the experiment — including predictions, success metrics, and a smoke test
 4. **Spawn** a worker to execute (direct shell or SLURM sbatch)
 5. **Ingest** the worker's REPORT.md
-6. **Compress** state — update belief confidences, append ledger, refresh frontier
+6. **Compress + publish** — update belief confidences, append ledger, refresh frontier, then curate `.gitignore`,
+   commit the atomic run, push its research branch, and verify the remote
 7. **Loop** back to step 1
 
 The loop stops only on interrupt boundaries: `BUDGET`, `NULL_STREAK`, `BLOCKER`, `AMBIGUITY`, or `IRREVERSIBLE`. Otherwise it keeps cycling.
 
 **Hypotheses over experiments.** The belief table is the real output. Experiments are tools to push beliefs toward supported or rejected.
+
+**Ground before testing.** Every hypothesis begins with Literature `pending`. A one-hypothesis review searches
+current primary work, contrary/null evidence, closest prior art, reusable code/data/methods, and better directions.
+Only a grounded hypothesis is eligible for empirical testing. New hypotheses discovered mid-loop follow the same
+rule, so the loop cannot silently drift into an ungrounded direction.
 
 **Wrong is fine, stuck is not.** Rejecting a hypothesis is as valuable as confirming one. When a core belief is rejected (confidence drops ≥ 0.3), dependent beliefs are flagged for re-evaluation and the frontier is adjusted.
 
@@ -152,6 +171,8 @@ delta-research/
 │   ├── STATE.template.md
 │   ├── PLAN.template.md
 │   ├── REPORT.template.md
+│   ├── LITERATURE.template.md  # One-hypothesis grounding review contract
+│   ├── LITERATURE_INDEX.template.md
 │   └── SYNTHESIS.template.md
 ├── scripts/
 │   └── wait_for_job.sh      # Universal SLURM monitor (FIFO + 30s safety net)
@@ -192,7 +213,7 @@ cd your-project/delta-research
 git pull
 ```
 
-Existing `STATE.md`, `INFRA.md`, `SYNTHESIS.md`, `REPORTS/`, and `RUNS/` are untouched — they live in your project root, not in `delta-research/`.
+Existing `STATE.md`, `INFRA.md`, `SYNTHESIS.md`, `REPORTS/`, `LITERATURE/`, and `RUNS/` are untouched — they live in your project root, not in `delta-research/`.
 
 ---
 

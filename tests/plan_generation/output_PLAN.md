@@ -6,6 +6,12 @@
 - **target belief**: #2 — Memory allocation is the dominant cost for large arrays (>1M), not comparisons
 - **type**: analysis
 
+## Literature Grounding
+- **status before run**: grounded
+- **target belief**: #2 — Memory allocation is the dominant cost for large arrays (>1M), not comparisons
+- **review artifact**: `REPORTS/R000.md`
+- **grounding implications**: The review recommends direct attribution with pre-allocation/copy-only controls and median-based repeated timings rather than inferring allocation cost from coarse profiles.
+
 ## Resources
 <!-- Exact paths. Worker uses ONLY these — no assumptions, no substitutions. -->
 <!-- If a resource is missing, worker must BLOCKER. -->
@@ -13,6 +19,7 @@
 - **dataset**: `data/synthetic_arrays.npz`
 - **prior artifacts**: N/A
 - **output dir**: RUNS/R003/artifacts/
+- **literature access**: N/A
 
 ## Commands
 <!-- Detailed step-by-step. Each step should explain WHAT to do and HOW to interpret results. -->

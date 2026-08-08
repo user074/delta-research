@@ -24,13 +24,13 @@
 
 ## BeliefState
 
-| # | Parent | Belief | Status | Confidence | Key evidence | Last updated |
-|---|--------|--------|--------|------------|--------------|--------------|
-| 1 | — | Timsort's advantage over quicksort grows with nearly-sorted data | active | 0.7 | R001: 3.2x faster on 90%-sorted arrays (1M elements) | 2026-02-21 |
-| 2 | — | Memory allocation is the dominant cost for large arrays (>1M), not comparisons | active | 0.5 | R002: inconclusive — alloc time noisy | 2026-02-22 |
-| 3 | — | Duplicate-heavy distributions reduce sorting time due to equal-element optimizations | supported | 0.85 | R003: discriminating support; 95% duplicates gave 1.8x speedup at 1M and 2.1x at 5M; `list.sort()` matched while `heapq.nsmallest` showed only 1.05x | 2026-02-23 |
-| 4 | 3 | Timsort's galloping mode has a super-linear benefit with more duplicates as array size grows | active | 0.5 | R003 new hypothesis: scaling trend showed speedup increasing with size, suggesting size-dependent duplicate benefit | 2026-02-23 |
-| 5 | — | Nearly-sortedness and high duplicate ratios compound to produce larger sorting speedups than either factor alone | active | 0.5 | R003 new hypothesis: R001 nearly-sorted speedup and R003 duplicate speedup may compound on mixed-structure data | 2026-02-23 |
+| # | Parent | Belief | Status | Confidence | Literature | Key evidence | Last updated |
+|---|--------|--------|--------|------------|------------|--------------|--------------|
+| 1 | — | Timsort's advantage over quicksort grows with nearly-sorted data | active | 0.7 | grounded (R000, 2026-02-20) | R001: 3.2x faster on 90%-sorted arrays (1M elements) | 2026-02-21 |
+| 2 | — | Memory allocation is the dominant cost for large arrays (>1M), not comparisons | active | 0.5 | grounded (R000, 2026-02-20) | R002: inconclusive — alloc time noisy | 2026-02-22 |
+| 3 | — | Duplicate-heavy distributions reduce sorting time due to equal-element optimizations | supported | 0.85 | grounded (R000, 2026-02-20) | R003: discriminating support; 95% duplicates gave 1.8x speedup at 1M and 2.1x at 5M; `list.sort()` matched while `heapq.nsmallest` showed only 1.05x | 2026-02-23 |
+| 4 | 3 | Timsort's galloping mode has a super-linear benefit with more duplicates as array size grows | active | 0.5 | pending | R003 new hypothesis: scaling trend showed speedup increasing with size, suggesting size-dependent duplicate benefit | 2026-02-23 |
+| 5 | — | Nearly-sortedness and high duplicate ratios compound to produce larger sorting speedups than either factor alone | active | 0.5 | pending | R003 new hypothesis: R001 nearly-sorted speedup and R003 duplicate speedup may compound on mixed-structure data | 2026-02-23 |
 
 ## Ledger
 
@@ -44,10 +44,12 @@
 
 | Rank | Delta | Target | Uncertainty | Info gain | Feasibility | Rationale | Blocked by |
 |------|-------|--------|-------------|-----------|-------------|-----------|------------|
-| 1 | Test combined effect: nearly-sorted + high-duplicate data. If speedups compound (>4x), it would explain why Timsort dominates on real-world benchmarks. | #5 | high | high | high | Direct test of the new compound-effects belief with a clear discriminating outcome either way | — |
-| 2 | Profile Timsort's internal merge operations with duplicates — count galloping steps vs element-by-element merges to confirm the mechanism. | #4 | high | high | med | Best direct mechanism test for the new size-scaling duplicate hypothesis | — |
-| 3 | Isolate alloc cost by pre-allocating output buffer | #2 | high | med | med | R002 remained noisy; this removes the suspected dominant cost directly | — |
-| 4 | Test with string arrays instead of floats — string comparison is more expensive, so algorithmic savings should be more visible. | #3 | low | med | high | Extends a now-supported belief to a more comparison-heavy datatype and checks practical scope | — |
+| 1 | Literature review: combined effects of nearly-sortedness and duplicate ratios | #5 | high | high | high | Ground new belief #5 before testing compounding | — |
+| 2 | Literature review: Timsort galloping behavior with duplicates and scale | #4 | high | high | high | Ground new belief #4 before testing the proposed mechanism | — |
+| 3 | Test combined effect: nearly-sorted + high-duplicate data. If speedups compound (>4x), it would explain why Timsort dominates on real-world benchmarks. | #5 | high | high | high | Direct test after grounding | Literature review for #5 |
+| 4 | Profile Timsort's internal merge operations with duplicates — count galloping steps vs element-by-element merges to confirm the mechanism. | #4 | high | high | med | Best direct mechanism test after grounding | Literature review for #4 |
+| 5 | Isolate alloc cost by pre-allocating output buffer | #2 | high | med | med | R002 remained noisy; this removes the suspected dominant cost directly | — |
+| 6 | Test with string arrays instead of floats — string comparison is more expensive, so algorithmic savings should be more visible. | #3 | low | med | high | Extends a now-supported grounded belief | — |
 
 ## Policy
 
