@@ -24,11 +24,11 @@
 
 ## BeliefState
 
-| # | Parent | Belief | Status | Confidence | Key evidence | Last updated |
-|---|--------|--------|--------|------------|--------------|--------------|
-| 1 | — | Timsort's advantage over quicksort grows with nearly-sorted data | active | 0.7 | R001: 3.2x faster on 90%-sorted arrays (1M elements) | 2026-02-21 |
-| 2 | — | Memory allocation is the dominant cost for large arrays (>1M), not comparisons | active | 0.5 | R002: inconclusive — alloc time noisy | 2026-02-22 |
-| 3 | — | Duplicate-heavy distributions reduce sorting time due to equal-element optimizations | active | 0.45 | seed — untested | 2026-02-20 |
+| # | Parent | Belief | Status | Confidence | Literature | Key evidence | Last updated |
+|---|--------|--------|--------|------------|------------|--------------|--------------|
+| 1 | — | Timsort's advantage over quicksort grows with nearly-sorted data | active | 0.7 | grounded (R000, 2026-02-20) | R001: 3.2x faster on 90%-sorted arrays (1M elements) | 2026-02-21 |
+| 2 | — | Memory allocation is the dominant cost for large arrays (>1M), not comparisons | active | 0.5 | grounded (R000, 2026-02-20) | R002: inconclusive — alloc time noisy | 2026-02-22 |
+| 3 | — | Duplicate-heavy distributions reduce sorting time due to equal-element optimizations | active | 0.45 | grounded (R000, 2026-02-20) | seed — untested | 2026-02-20 |
 
 ## Ledger
 

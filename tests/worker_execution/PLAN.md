@@ -6,11 +6,18 @@
 - **target belief**: #3 — Duplicate-heavy distributions reduce sorting time due to equal-element optimizations
 - **type**: experiment
 
+## Literature Grounding
+- **status before run**: grounded
+- **target belief**: #3 — Duplicate-heavy distributions reduce sorting time due to equal-element optimizations
+- **review artifact**: `REPORTS/R000.md`
+- **grounding implications**: Prior work indicates comparison counts and run structure are the key alternatives, so the benchmark includes algorithm and placement controls.
+
 ## Resources
 - **checkpoint**: N/A
 - **dataset**: Generate synthetic arrays inline (numpy random with controlled duplicate ratios)
 - **prior artifacts**: None needed — this is a fresh benchmark
 - **output dir**: RUNS/R003/artifacts/
+- **literature access**: N/A
 
 ## Commands
 

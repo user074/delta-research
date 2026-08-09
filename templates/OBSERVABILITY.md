@@ -12,7 +12,8 @@ Every run must organize outputs into these directories:
 
 ```
 RUNS/R###/
-├── PLAN.md                        # Immutable plan (created by supervisor)
+├── PLAN.initial.md                # Immutable preregistration snapshot
+├── PLAN.md                        # Live versioned plan; controlled amendments allowed
 ├── experiment.py                  # Generated script (SLURM mode only)
 ├── job.sh                         # SLURM job script (SLURM mode only)
 ├── slurm-<JOB_ID>.out             # Raw SLURM stdout (SLURM mode only)
@@ -31,6 +32,10 @@ RUNS/R###/
 ```
 
 **Rules:**
+- **PLAN.initial.md / PLAN.md** — The supervisor creates byte-identical copies before execution. Preserve the
+  initial snapshot. Workers repair Class A execution bugs in the live plan, increment `plan_version`, and append
+  its Amendment Log. Class B changes require supervisor approval in the same run; Class C redesign requires a new
+  run. Never revise scientific targets or predictions in response to observed outcomes.
 - **logs/** — Dense, append-only text files. One line per step or event. For humans to analyze what happened in detail. Name files by purpose (e.g. `train.log` for training, `benchmark.log` for benchmarks, `analysis.log` for data analysis).
 - **metrics/** — Structured JSON. Machine-readable, used by the report generator and wandb sync. Name files by phase (e.g. `results.json`, `training_history.json`, `scores.json`).
 - **checkpoints/** — Large model weights and optimizer states. Separate from `artifacts/` so the whole tree can be gitignored (`RUNS/*/checkpoints/`). On clusters, this directory may be a symlink to a scratch path from INFRA.md (e.g. `/scratch/$USER/{RUN_ID}/`) — the report still references `checkpoints/<file>` regardless.

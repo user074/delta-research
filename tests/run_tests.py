@@ -570,7 +570,8 @@ def validate_plan(plan_path: Path, state_path: Path) -> TestResult:
     section_names = set(sections.keys())
 
     # Required sections
-    for required in ["Delta", "Resources", "Commands", "Success metrics", "Stop conditions", "Context", "Meta"]:
+    for required in ["Delta", "Literature Grounding", "Resources", "Commands", "Success metrics", "Stop conditions",
+                     "Context", "Amendment policy", "Amendment Log", "Meta"]:
         found = any(required.lower() in s.lower() for s in section_names)
         r.check(f"Has section: {required}", found)
 
@@ -589,6 +590,16 @@ def validate_plan(plan_path: Path, state_path: Path) -> TestResult:
             resources_text = val
     has_paths = bool(re.search(r"(/[\w/.-]+|data/|RUNS/|artifacts/)", resources_text))
     r.check("Resources section has actual paths", has_paths)
+
+    grounding_text = ""
+    for key, val in sections.items():
+        if "literature grounding" in key.lower():
+            grounding_text = val
+    r.check(
+        "Plan has a completed literature gate",
+        "grounded" in grounding_text.lower() and "reports/r" in grounding_text.lower(),
+        "Empirical plans must cite the completed REPORTS/R###.md grounding review"
+    )
 
     # Targets the right belief — state has beliefs at 0.7, 0.5, 0.45
     # Agent should target #2 (0.5) or #3 (0.45) — most uncertain
@@ -635,8 +646,8 @@ def validate_report(report_path: Path) -> TestResult:
     section_names_lower = {s.lower() for s in sections.keys()}
 
     # Required sections
-    for required in ["Summary", "Motivation", "Method", "Results", "Signal", "Verdict",
-                      "Confounds", "New hypotheses", "Next tests", "Meta"]:
+    for required in ["Summary", "Motivation", "Literature grounding", "Plan amendments", "Method", "Results",
+                     "Signal", "Verdict", "Confounds", "New hypotheses", "Next tests", "Meta"]:
         found = any(required.lower() in s for s in section_names_lower)
         r.check(f"Has section: {required}", found)
 
@@ -714,6 +725,90 @@ def validate_report(report_path: Path) -> TestResult:
 
 
 # ---------------------------------------------------------------------------
+# Framework contract: literature gate + GitHub publication
+# ---------------------------------------------------------------------------
+
+def validate_framework_contracts() -> TestResult:
+    r = TestResult("Framework Contracts (Plans + Literature + GitHub)")
+    templates = ROOT / "templates"
+    supervisor = (templates / "SUPERVISOR.md").read_text()
+    state = (templates / "STATE.template.md").read_text()
+    plan = (templates / "PLAN.template.md").read_text()
+    report = (templates / "REPORT.template.md").read_text()
+    init = (templates / "INIT.md").read_text()
+    observability = (templates / "OBSERVABILITY.md").read_text()
+    literature_path = templates / "LITERATURE.template.md"
+    literature_index_path = templates / "LITERATURE_INDEX.template.md"
+
+    r.check("Literature template exists", literature_path.exists())
+    r.check("Literature index template exists", literature_index_path.exists())
+    literature = literature_path.read_text() if literature_path.exists() else ""
+    for heading in ["Target hypothesis", "Search protocol", "Evidence map", "Synthesis",
+                    "Grounding verdict", "New hypotheses", "Next tests", "Sources", "Meta"]:
+        r.check(
+            f"Literature template has: {heading}",
+            bool(re.search(rf"^## {re.escape(heading)}\s*$", literature, re.MULTILINE)),
+        )
+
+    r.check("Supervisor enforces one review per hypothesis",
+            "Each literature-review run grounds exactly one hypothesis" in supervisor)
+    r.check("Supervisor blocks ungrounded empirical work",
+            "may target a belief only when" in supervisor and "Literature value is `grounded" in supervisor)
+    r.check("Supervisor requires current search and primary sources",
+            "current internet/database search" in supervisor and "Prioritize primary sources" in supervisor)
+    r.check("Supervisor requires contrary evidence",
+            "strongest contrary" in supervisor.lower())
+    r.check("New hypotheses start literature pending",
+            "Literature `pending`" in supervisor)
+    r.check("State template has Literature column",
+            "| Literature |" in state and "grounded (R###, YYYY-MM-DD)" in state)
+    r.check("Plan template has Literature Grounding",
+            "## Literature Grounding" in plan)
+    r.check("Experimental report cites grounding",
+            "## Literature grounding" in report and "review artifact" in report.lower())
+    r.check("Supervisor requires versioned literature archive",
+            "LITERATURE/B###/R###/" in supervisor and "byte-identical" in supervisor)
+    r.check("Supervisor preserves query/evidence/bibliography artifacts",
+            all(name in supervisor for name in ("queries.md", "evidence.csv", "sources.bib")))
+    r.check("Supervisor updates literature index",
+            "Update `LITERATURE/INDEX.md`" in supervisor)
+
+    r.check("Supervisor has mandatory Phase 6b",
+            "Phase 6b: Curate, commit, and push" in supervisor)
+    r.check("Git staging forbids blanket add",
+            "Never use `git add .`, `git add -A`, or `git add --all`" in supervisor)
+    r.check("Git publication uses non-default branch",
+            "Use a non-default research branch" in supervisor)
+    r.check("Git publication verifies remote",
+            "Verify local HEAD equals the remote-tracking branch" in supervisor)
+    r.check("Git failures forbid force push",
+            "do not force-push" in supervisor)
+    r.check("Initialization records publication authorization",
+            "GitHub publication authorization" in init)
+
+    r.check("Supervisor preserves initial and live plans",
+            "PLAN.initial.md" in supervisor and "Controlled plan amendments" in supervisor)
+    r.check("Observability layout preserves both plans",
+            "PLAN.initial.md" in observability and "PLAN.md" in observability)
+    r.check("Class A permits worker-autonomous repair",
+            "Class A — worker-autonomous repair" in supervisor and "Continue the same run" in supervisor)
+    r.check("Class B resumes the same run after approval",
+            "AMENDMENT_NEEDED" in supervisor
+            and ("resume the same" in supervisor.lower() or "same worker/run" in supervisor.lower()))
+    r.check("Class C protects scientific commitments",
+            "Class C — scientific redesign" in supervisor and "primary endpoint" in supervisor
+            and "observed results" in supervisor)
+    r.check("Plan template has versioned amendment audit",
+            "## Amendment policy" in plan and "## Amendment Log" in plan and "plan_version" in plan)
+    r.check("Report templates disclose plan amendments",
+            "## Plan amendments" in report and "## Plan amendments" in literature)
+    r.check("Initialization teaches controlled resource repair",
+            "identity-equivalent path/API" in init and "AMENDMENT_NEEDED" in init)
+
+    return r
+
+
+# ---------------------------------------------------------------------------
 # Test 3: State compression
 # ---------------------------------------------------------------------------
 
@@ -785,6 +880,16 @@ def validate_state_compression(
     else:
         r.check("New beliefs have Parent field", False, "No new beliefs to check")
 
+    if new_beliefs:
+        all_pending = all(b.get("Literature", "").strip().lower() == "pending" for b in new_beliefs)
+        r.check(
+            "New beliefs require literature grounding",
+            all_pending,
+            f"New belief Literature values: {[b.get('Literature', '') for b in new_beliefs]}"
+        )
+    else:
+        r.check("New beliefs require literature grounding", False, "No new beliefs to check")
+
     # Frontier updated — R003's delta removed
     frontier_before = find_table(before, FRONTIER_PATTERN)
     frontier_after = find_table(after, FRONTIER_PATTERN)
@@ -826,6 +931,17 @@ def validate_state_compression(
         )
     else:
         r.check("Frontier has scoring dimension columns", False, "No frontier entries to check")
+
+    review_targets = {
+        f.get("Target", "") for f in frontier_after
+        if "literature review" in f.get("Delta", "").lower()
+    }
+    new_ids = {f"#{b.get('#')}" for b in new_beliefs}
+    r.check(
+        "Frontier grounds every new belief before experiments",
+        bool(new_ids) and new_ids.issubset(review_targets),
+        f"Expected review targets {sorted(new_ids)}, found {sorted(review_targets)}"
+    )
 
     # total_runs incremented
     runs_before = extract_meta_field(before, "total_runs")
@@ -904,7 +1020,8 @@ REVIEW_PROMPTS = {
         "Evaluate the output against the template and supervisor rules. Report:\n\n"
         "## Compliance\n"
         "For each requirement below, say PASS or FAIL with a one-line reason:\n"
-        "- All template sections present (Delta, Resources, Commands, Success metrics, Stop conditions, Context, Meta)\n"
+        "- All template sections present (Delta, Literature Grounding, Resources, Commands, Success metrics, Stop conditions, Context, Amendment policy, Amendment Log, Meta)\n"
+        "- Empirical plan cites the exact completed literature-review report for each target belief\n"
         "- Delta targets the most uncertain belief(s) (confidence nearest 0.5)\n"
         "- Bandit reasoning: does it show awareness of uncertainty, info gain, and feasibility?\n"
         "- Commands have multiple substantive steps (not just 'run a script')\n"
@@ -933,7 +1050,7 @@ REVIEW_PROMPTS = {
         "Evaluate the output against the template and worker contract. Report:\n\n"
         "## Compliance\n"
         "For each requirement below, say PASS or FAIL with a one-line reason:\n"
-        "- All template sections present (Summary, Motivation, Method, Results/Data/Visualizations/Analysis, "
+        "- All template sections present (Summary, Motivation, Literature grounding, Plan amendments, Method, Results/Data/Visualizations/Analysis, "
         "Signal, Verdict, Confounds, New hypotheses, Next tests, Artifacts, Meta)\n"
         "- Summary is concise and self-contained (a researcher could understand what happened)\n"
         "- Data is inline — actual numbers in tables, not just pointers to files\n"
@@ -971,7 +1088,7 @@ REVIEW_PROMPTS = {
         "- BeliefState: confidence magnitude is reasonable (not too aggressive, not too timid)\n"
         "- BeliefState: status updated correctly (≥0.8 → supported, ≤0.2 → rejected)\n"
         "- BeliefState: Parent column present with values for all beliefs\n"
-        "- New beliefs: added from report's New hypotheses with confidence 0.5\n"
+        "- New beliefs: added from report's New hypotheses with confidence 0.5 and Literature=pending\n"
         "- New beliefs: Parent field populated (from [parent: #N] hints in report)\n"
         "- Frontier: completed delta removed\n"
         "- Frontier: new entries added for new beliefs\n"
@@ -1057,12 +1174,13 @@ PROMPTS = {
         "Read {supervisor} — focus on section 2 (Supervisor Loop) for the planning process "
         "and section 3 (Contracts) for rules.\n\n"
         "Read the plan template at {plan_template} — your output MUST use this exact structure "
-        "with these exact section headings: Delta, Resources, Commands, Success metrics, "
-        "Stop conditions, Context, Meta.\n\n"
+        "with these exact section headings: Delta, Literature Grounding, Resources, Commands, Success metrics, "
+        "Stop conditions, Context, Amendment policy, Amendment Log, Meta.\n\n"
         "Read the current state from {input}.\n\n"
         "Generate a plan for the next run following Phase 2 (Select delta) and Phase 3 (Create run) rules:\n"
         "- Use bandit reasoning: assess Uncertainty, Info gain, Feasibility for candidates\n"
         "- Target the most uncertain belief (confidence nearest 0.5)\n"
+        "- Select only a belief with Literature=grounded for an empirical plan and cite its REPORTS/R###.md review\n"
         "- Resources must use exact paths from STATE.md Environment — do not invent paths\n"
         "- Commands must have multiple substantive analysis steps\n"
         "- Context must reference specific numbers from prior runs\n"
@@ -1074,7 +1192,7 @@ PROMPTS = {
         "Read {supervisor} section 4 (Worker Prompt Template) for the contract and rules.\n\n"
         "Read the report template at {report_template} — your output MUST use this exact structure "
         "with these exact section headings in this order: "
-        "Summary, Motivation, Method, Results (with sub-sections Data, Visualizations, Analysis), "
+        "Summary, Motivation, Literature grounding, Plan amendments, Method, Results (with sub-sections Data, Visualizations, Analysis), "
         "Signal, Verdict, Confounds, New hypotheses, Next tests, Artifacts, Meta.\n\n"
         "CRITICAL: Use the EXACT section headings from the template. Do not rename, reorder, "
         "or use alternative headings. The supervisor parses these by name.\n\n"
@@ -1092,14 +1210,15 @@ PROMPTS = {
         "You are a research supervisor.\n\n"
         "Read {supervisor} section 5 (State Compression Rules) for the exact update procedure.\n\n"
         "Read the state template at {state_template} — your output MUST follow this structure "
-        "including: Parent column in BeliefState, paradigm in Meta, "
+        "including: Parent and Literature columns in BeliefState, paradigm in Meta, "
         "and Uncertainty/Info gain/Feasibility columns in Frontier.\n\n"
         "The current state is in {state_before}.\n"
         "The report to ingest is in {report}.\n\n"
         "Apply compression rules:\n"
         "- Append to Ledger (use exact delta description from the report, not paraphrased)\n"
         "- Update belief confidence in the correct direction and magnitude\n"
-        "- Add new beliefs from report's New hypotheses at confidence 0.5 with Parent field\n"
+        "- Add new beliefs from report's New hypotheses at confidence 0.5 with Parent field and Literature=pending\n"
+        "- Add a literature-review frontier entry ahead of empirical deltas for every new belief\n"
         "- Remove completed delta from Frontier, add new entries for new beliefs\n"
         "- Score frontier entries on Uncertainty, Info gain, Feasibility and re-rank\n"
         "- Check for paradigm shift if any belief was rejected or dropped ≥0.3\n"
@@ -1314,7 +1433,7 @@ def main():
     parser.add_argument("--review", action="store_true",
                         help="LLM reviews outputs against templates (checks quality, not just structure)")
     parser.add_argument("--agent", default="claude", help="Agent CLI to use (claude, codex)")
-    parser.add_argument("--test", choices=["init", "plan", "worker", "compression", "slurm", "all"], default="all",
+    parser.add_argument("--test", choices=["init", "plan", "worker", "compression", "slurm", "contracts", "all"], default="all",
                         help="Which test to run")
     parser.add_argument("--debug", action="store_true", help="Show parsed table data")
     args = parser.parse_args()
@@ -1327,6 +1446,7 @@ def main():
         "worker": args.test in ("worker", "all"),
         "compression": args.test in ("compression", "all"),
         "slurm": args.test in ("slurm", "all"),
+        "contracts": args.test in ("contracts", "all"),
     }
 
     # Generate outputs if requested
@@ -1389,6 +1509,9 @@ def main():
             TESTS / "slurm_job_generation" / "PLAN.md",
             TESTS / "slurm_job_generation" / "INFRA.md",
         ))
+
+    if tests_to_run["contracts"]:
+        results.append(validate_framework_contracts())
 
     # Summary
     total_passed = sum(r.passed() for r in results)

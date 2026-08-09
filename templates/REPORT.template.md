@@ -6,6 +6,20 @@
 ## Motivation
 (Why this experiment? What belief is being tested? What would support vs contradict?)
 
+## Literature grounding
+
+- **target belief status**: grounded
+- **review artifact**: `REPORTS/R###.md`
+- **design implications adopted**: (methods, controls, baselines, assets, or scope taken from the review)
+- **review recommendation not adopted**: (anything deliberately changed, with rationale)
+
+## Plan amendments
+
+<!-- Compare PLAN.initial.md with the final PLAN.md. State "None" if unchanged. -->
+| Version | Class | When | What changed | Why scope was preserved | Outcomes seen first? |
+|---------|-------|------|--------------|-------------------------|----------------------|
+| (vN) | (A/B) | (timestamp) | (before → after) | (scientific invariants retained) | (no, or exact data already seen) |
+
 ## Method
 (What was done, step by step — enough detail that a human could reproduce)
 
@@ -44,6 +58,7 @@
 
 ## New hypotheses
 <!-- NEW belief to track? Include parent belief # if it depends on an existing one. -->
+<!-- Every new hypothesis enters STATE.md with Literature=pending and must receive its own review run. -->
 - (new hypothesis, with reasoning) [parent: #N or —]
 
 ## Next tests

@@ -6,13 +6,19 @@
 - **target belief**: #2 — Memory allocation is the dominant cost for large arrays (>1M), not comparisons
 - **type**: analysis
 
+## Literature Grounding
+- **status before run**: grounded
+- **target belief**: #2 — Memory allocation is the dominant cost for large arrays (>1M), not comparisons
+- **review artifact**: `REPORTS/R000.md`
+- **grounding implications**: The review recommends direct attribution with pre-allocation/copy-only controls and median-based repeated timings rather than inferring allocation cost from coarse profiles.
+
 ## Resources
-<!-- Exact paths. Worker uses ONLY these — no assumptions, no substitutions. -->
-<!-- If a resource is missing, worker must BLOCKER. -->
+<!-- Exact resource identities and paths. Identity-equivalent path/API repairs are Class A amendments. -->
 - **checkpoint**: N/A
 - **dataset**: `data/synthetic_arrays.npz`
 - **prior artifacts**: N/A
 - **output dir**: RUNS/R003/artifacts/
+- **literature access**: N/A
 
 ## Commands
 <!-- Detailed step-by-step. Each step should explain WHAT to do and HOW to interpret results. -->
@@ -67,8 +73,26 @@ Include all data inline, generate visualizations, embed plots with ![](path).
 - Frontier comparison for this planning pass: candidate for belief `#3` had uncertainty `high` at confidence `0.45`, info gain `high`, feasibility `high`; candidate for belief `#2` had uncertainty `high` at confidence `0.5`, info gain `med`, feasibility `med`. This run selects `#2` because the confidence is nearest `0.5`, satisfying the supervisor rule to target the most uncertain belief first.
 - Available hardware from Environment is CPU-only with `12` cores on an AMD Ryzen 9 5900X and `gpu: N/A`, so the run should maximize throughput with parallel trial execution across all CPU cores rather than leaving repetitions serialized.
 
+## Amendment policy
+
+- **Class A — worker-autonomous repair**: fix execution-only defects that preserve the target belief, estimand,
+  resource identity, primary endpoint, success threshold, and predictions; increment `plan_version`, append the
+  Amendment Log, and continue this run.
+- **Class B — supervisor-approved amendment**: emit `AMENDMENT_NEEDED` with an exact proposed diff for a
+  scope-preserving resource or method change; resume this run after approval.
+- **Class C — scientific redesign**: do not amend changes to the target, intervention, model/dataset family,
+  primary endpoint or threshold, predictions after results, or budget boundary; preserve evidence for a new run.
+- `PLAN.initial.md` is never edited.
+
+## Amendment Log
+
+| Version | Timestamp | Actor | Class | Issue / evidence | Exact change | Scientific impact |
+|---------|-----------|-------|-------|------------------|--------------|-------------------|
+| v1 | 2026-03-07 | supervisor | initial | — | Initial plan | Preregistered baseline |
+
 ## Meta
 - **run_id**: R003
 - **created**: 2026-03-07
 - **time_budget**: 90 minutes
+- **plan_version**: 1
 - **status**: planned
