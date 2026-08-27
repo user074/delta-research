@@ -1,0 +1,10 @@
+{
+  "run_id": "R003",
+  "seed": 42,
+  "repetitions": 3,
+  "started": "2026-08-27T07:38:29.126372+00:00",
+  "completed": "2026-08-27T07:38:31.863358+00:00",
+  "python_executable": "CPython 3.10.13",
+  "numpy": "1.26.2",
+  "platform": "macOS-26.5.2-arm64-arm-64bit"
+}

@@ -1,81 +1,55 @@
 # PLAN — R003
 
-## Delta
-- **what**: Benchmark Python's `sorted()` on arrays with varying duplicate ratios (50%, 80%, 95%) across sizes 1K to 10M to test whether duplicate-heavy distributions reduce sorting time
-- **intent**: Determine if Timsort's equal-element optimizations produce measurable speedup on high-duplicate data, and how the effect scales with array size
-- **target belief**: #3 — Duplicate-heavy distributions reduce sorting time due to equal-element optimizations
-- **type**: experiment
+## Question and finish line
 
-## Literature Grounding
-- **status before run**: grounded
-- **target belief**: #3 — Duplicate-heavy distributions reduce sorting time due to equal-element optimizations
-- **review artifact**: `REPORTS/R000.md`
-- **grounding implications**: Prior work indicates comparison counts and run structure are the key alternatives, so the benchmark includes algorithm and placement controls.
+- **research goal:** Test whether duplicate structure materially changes Python sorting performance.
+- **hypothesis:** #3 — duplicate-heavy distributions reduce Python sorting time.
+- **primary question:** How does duplicate ratio affect Python sorting across practical input sizes?
+- **support / contradict:** At 1M/95%, speedup >1.2× supports; all duplicate arms <1.05× contradict; otherwise cannot decide.
+- **minimum complete evidence:** 0%, 50%, 80%, and 95% duplicates across 1K–1M, three repetitions, plus `list.sort()` control.
+- **answer produced:** Whether the effect is material and consistent across the tested size/ratio range.
+- **ETA to answer:** 8 minutes.
 
-## Resources
-- **checkpoint**: N/A
-- **dataset**: Generate synthetic arrays inline (numpy random with controlled duplicate ratios)
-- **prior artifacts**: None needed — this is a fresh benchmark
-- **output dir**: RUNS/R003/artifacts/
-- **literature access**: N/A
+## Evidence package
 
-## Commands
+- **main comparison:** `sorted()` at four sizes and four duplicate ratios.
+- **repetitions / coverage:** Three `timeit` repetitions for all 16 conditions.
+- **required controls or ablations:** Repeat the same grid with `list.sort()` to check implementation consistency.
+- **first command:** `python RUNS/R003/scripts/benchmark_duplicates.py`
+- **outputs:** `tests/worker_execution/artifacts/r003_metrics.csv`, optional one plot, `tests/worker_execution/output_REPORT.md`
+- **technical lookup:** None.
 
-### Step 1: Generate test arrays
-For each size in [1_000, 10_000, 100_000, 1_000_000, 5_000_000]:
-- Generate a baseline array of random floats (0% duplicates)
-- Generate arrays with 50%, 80%, 95% duplicate ratios
-- For N% duplicates: fill N% of positions with the value 42.0, rest are random floats
-- Use `numpy.random.seed(42)` for reproducibility
+## Method and resources
 
-### Step 2: Benchmark sorting
-For each (size, duplicate_ratio) combination:
-- Time `sorted(array.tolist())` using `timeit` with at least 5 repetitions
-- Record median time (not mean — reduces outlier sensitivity)
-- Also record min and max for variance assessment
-- Important: convert numpy array to list first (`sorted()` is the target, not `numpy.sort()`)
+- **approach / data:** Seed 42 random floats; replace selected positions with `42.0`; only duplicate ratio varies.
+- **metric:** Min/median/max time, max/min spread, and baseline-median/condition-median speedup.
+- **execution:** direct
+- **paths:** Generate arrays inline; `REPORTS/R001.md`; `REPORTS/R002.md`.
+- **compute:** CPU-only; GPU count N/A.
+- **parallel strategy:** One timing process so concurrent CPU work does not bias the runtime comparison.
+- **utilization plan:** Keep each timed condition isolated and run the grid sequentially.
+- **launch:** Use the first command.
+- **expected wall-clock:** 8 minutes to the complete comparison.
 
-### Step 3: Compute speedup relative to baseline
-For each size:
-- Compute speedup = baseline_median / duplicate_median for each duplicate ratio
-- If speedup > 1.2 at 95% duplicates, that's meaningful evidence for belief #3
-- If speedup < 1.05 across all ratios, that contradicts belief #3
+## Prediction
 
-### Step 4: Visualize results
-- Plot 1: Median sort time vs array size, one line per duplicate ratio (log-log scale)
-- Plot 2: Speedup vs duplicate ratio, one line per array size
-- Save both to RUNS/R003/artifacts/
+- **expected:** About 2× speedup at 1M/95%.
+- **surprising:** Less than 1.05× across duplicate conditions would contradict the hypothesis.
 
-### Step 5: Check for confounds
-- Is the speedup (if any) from fewer unique values reducing cache misses, rather than Timsort's equal-element optimization?
-- Test: compare `sorted()` vs `list.sort()` — if both show same speedup, it's likely cache/memory, not algorithm-specific
+## Bounds
 
-### Final step: Write report
-Write report to REPORTS/R003.md following the report template.
-Include all timing data inline, generate visualizations, embed plots with ![](path).
+- **time budget:** 15 minutes.
+- **finish:** Complete the evidence package; report once it supports, contradicts, or cannot decide the claim.
+- **stop:** One condition exceeds 5 minutes, measurement is invalid, or budget expires.
+- **adapt freely:** Change commands, paths, batching, compute, and intermediate analysis without approval.
+- **integrity:** Preserve outcomes and mark outcome-driven scientific changes exploratory.
 
-## Success metrics
-| Metric | Baseline | Target | How to measure |
-|--------|----------|--------|----------------|
-| Speedup at 95% duplicates, 1M elements | 1.0x (random baseline) | >1.2x would support #3 | median(baseline) / median(95%-dup) |
-| Speedup at 95% duplicates, 1M elements | 1.0x (random baseline) | <1.05x would contradict #3 | same ratio |
-| Variance (max/min ratio) | — | <2.0 for reliable results | max_time / min_time per config |
+## Working notes
 
-## Stop conditions
-- BLOCKER if: any single benchmark takes >5 minutes (suggests size too large)
-- BLOCKER if: variance (max/min) exceeds 5x (results unreliable)
-- TIMEOUT after: 15 minutes
-
-## Context
-**Relevant beliefs:**
-- Belief #3 (confidence 0.45): Duplicate-heavy distributions reduce sorting time due to equal-element optimizations — untested seed belief
-
-**Prior findings:**
-- R001: Timsort 3.2x faster than quicksort on 90%-sorted arrays at 1M elements — shows Timsort does exploit structure
-- R002: Memory alloc profiling was noisy, inconclusive on whether alloc or comparisons dominate
+None.
 
 ## Meta
-- **run_id**: R003
-- **created**: 2026-02-23
-- **time_budget**: 15 minutes
-- **status**: planned
+
+- **run_id:** R003
+- **created:** 2026-02-23
+- **status:** working

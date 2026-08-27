@@ -6,67 +6,47 @@
 - **started**: 2026-02-20
 - **last_updated**: 2026-02-23
 - **total_runs**: 3
-- **status**: active
+- **last_experimental_evidence**: R003
+- **direction_recovery_used_since_experiment**: false
+- **status**: goal-reached
 - **paradigm**: v1
 
----
-
 ## Environment
-- **conda/venv**: `conda activate sorting-perf`
+- **env activation**: `conda activate sorting-perf`
 - **python**: 3.11.5
 - **key packages**: numpy 1.26.0, matplotlib 3.8.0, pandas 2.1.0
 - **gpu**: N/A
-- **checkpoints**: N/A
+- **confirmed gpu count**: N/A
 - **datasets**: `data/synthetic_arrays.npz`
 - **working dir**: /home/user/sorting-perf
 
----
-
 ## BeliefState
 
-| # | Parent | Belief | Status | Confidence | Literature | Key evidence | Last updated |
-|---|--------|--------|--------|------------|------------|--------------|--------------|
-| 1 | — | Timsort's advantage over quicksort grows with nearly-sorted data | active | 0.7 | grounded (R000, 2026-02-20) | R001: 3.2x faster on 90%-sorted arrays (1M elements) | 2026-02-21 |
-| 2 | — | Memory allocation is the dominant cost for large arrays (>1M), not comparisons | active | 0.5 | grounded (R000, 2026-02-20) | R002: inconclusive — alloc time noisy | 2026-02-22 |
-| 3 | — | Duplicate-heavy distributions reduce sorting time due to equal-element optimizations | supported | 0.85 | grounded (R000, 2026-02-20) | R003: discriminating support; 95% duplicates gave 1.8x speedup at 1M and 2.1x at 5M; `list.sort()` matched while `heapq.nsmallest` showed only 1.05x | 2026-02-23 |
-| 4 | 3 | Timsort's galloping mode has a super-linear benefit with more duplicates as array size grows | active | 0.5 | pending | R003 new hypothesis: scaling trend showed speedup increasing with size, suggesting size-dependent duplicate benefit | 2026-02-23 |
-| 5 | — | Nearly-sortedness and high duplicate ratios compound to produce larger sorting speedups than either factor alone | active | 0.5 | pending | R003 new hypothesis: R001 nearly-sorted speedup and R003 duplicate speedup may compound on mixed-structure data | 2026-02-23 |
+| # | Parent | Belief | Status | Confidence | Key evidence | Last updated |
+|---|--------|--------|--------|------------|--------------|--------------|
+| 1 | — | Timsort's advantage over quicksort grows with nearly-sorted data | active | 0.7 | R001: 3.2× faster on 90%-sorted arrays | 2026-02-21 |
+| 2 | — | Allocation and copying account for more than half of copy-plus-sort time above 1M elements | active | 0.5 | R002 timing was too noisy | 2026-02-22 |
+| 3 | — | Duplicate-heavy distributions reduce sorting time | supported | 0.85 | R003: at 1M items, 95% duplicates made `sorted()` 5.48× faster; all tested sizes moved in the same direction | 2026-02-23 |
 
 ## Ledger
 
-| Run | Delta | Signal | Verdict | Belief | Link |
-|-----|-------|--------|---------|--------|------|
-| R001 | Compare timsort vs quicksort on nearly-sorted 1M arrays | discriminating | supports | #1 | [R001](REPORTS/R001.md) |
-| R002 | Profile memory allocation vs comparison time on random 5M arrays | partial | unclear | #2 | [R002](REPORTS/R002.md) |
-| R003 | Benchmark sorting with varying duplicate ratios | discriminating | supports | #3 | [R003](REPORTS/R003.md) |
+| Run | Question | Key result | Conclusion | Belief | Link |
+|-----|----------|------------|------------|--------|------|
+| R001 | Does Timsort beat quicksort on nearly-sorted 1M arrays? | Timsort was 3.2× faster | supports | #1 | [R001](REPORTS/R001.md) |
+| R002 | Do allocation and copying exceed half of copy-plus-sort time? | Timing was too noisy | cannot decide | #2 | [R002](REPORTS/R002.md) |
+| R003 | Do duplicate-heavy inputs reduce Python sorting time? | At 1M items, 95% duplicates made `sorted()` 5.48× faster | supports | #3 | [R003](REPORTS/R003.md) |
 
 ## Frontier
 
-| Rank | Delta | Target | Uncertainty | Info gain | Feasibility | Rationale | Blocked by |
-|------|-------|--------|-------------|-----------|-------------|-----------|------------|
-| 1 | Literature review: combined effects of nearly-sortedness and duplicate ratios | #5 | high | high | high | Ground new belief #5 before testing compounding | — |
-| 2 | Literature review: Timsort galloping behavior with duplicates and scale | #4 | high | high | high | Ground new belief #4 before testing the proposed mechanism | — |
-| 3 | Test combined effect: nearly-sorted + high-duplicate data. If speedups compound (>4x), it would explain why Timsort dominates on real-world benchmarks. | #5 | high | high | high | Direct test after grounding | Literature review for #5 |
-| 4 | Profile Timsort's internal merge operations with duplicates — count galloping steps vs element-by-element merges to confirm the mechanism. | #4 | high | high | med | Best direct mechanism test after grounding | Literature review for #4 |
-| 5 | Isolate alloc cost by pre-allocating output buffer | #2 | high | med | med | R002 remained noisy; this removes the suspected dominant cost directly | — |
-| 6 | Test with string arrays instead of floats — string comparison is more expensive, so algorithmic savings should be more visible. | #3 | low | med | high | Extends a now-supported grounded belief | — |
+| Rank | Experiment question | Target | Decision result | Minimum complete evidence | ETA | Blocked by |
+|------|---------------------|--------|-----------------|---------------------------|-----|------------|
 
 ## Policy
-
-### Interrupt boundaries
-- `BUDGET`: 2 hours cumulative
-- `NULL_STREAK`: 3 consecutive null-signal runs
-- `BLOCKER`: worker returns BLOCKER
-- `AMBIGUITY`: frontier empty AND regeneration fails
-- `IRREVERSIBLE`: irreversible action needs human approval
-
-### Scoring
-- Signal: `discriminating` (clearly moved a belief) | `partial` (some evidence) | `null` (no info)
-- Verdict: `supports` | `contradicts` | `unclear` | `BLOCKER`
-
-### Constraints
-- One major delta per run
-- Worker must not modify STATE.md or choose directions
+- `GOAL`: target hypothesis decided and no requested question remains
+- `NULL_STREAK`: 3 consecutive completed experiments cannot decide
+- `STALL`: no decision-capable experiment can be specified
+- `BLOCKER`: selected experiment cannot proceed after bounded repair
 
 ## Scratch
-- R002 had high variance in alloc measurements — might need to pin CPU frequency or use median of 50+ trials
+- R002 had high variance in allocation measurements.
+- R003 answered the target hypothesis in the tested scope; no follow-up run was created.

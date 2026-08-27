@@ -10,14 +10,55 @@
 
 ## 1. Principles
 
-1. **Delta-first** — The unit of progress is *what changed → what happened → what it means*.
-2. **Ground before testing** — Every hypothesis receives its own literature-review run before an empirical run may target it. Prior work should sharpen, redirect, or retire weak ideas before compute is spent.
-3. **Bisect the hypothesis space** — A good delta splits uncertain beliefs in two. Even negative results are progress if they eliminate a direction.
-4. **Compression over narration** — STATE.md holds structured tables, not prose. Compress after every run.
-5. **Autonomy with crisp interrupts** — Default is *keep going*. Stop only on defined boundaries.
-6. **Single source of truth** — STATE.md is memory. Reports are the detailed record. SYNTHESIS.md is the human-facing interpretation. Everything else is derived.
-7. **One run, one published commit** — A cycle is not durable until its run-scoped files, state compression, and
+1. **Evidence-first** — The default run changes an experimental variable, measures an outcome, and updates an
+   active hypothesis. Producing activity, prose, or another run ID is not progress.
+2. **Minimum decisive experiment** — Run the fastest test that is good enough to support or contradict the target
+   hypothesis in the tested scope. Scientific adequacy is the floor; among adequate tests, minimize total time to
+   result. Perfection, exhaustiveness, and maximum rigor are not the objective.
+3. **Shortest wall-clock hardware use** — Once the human confirms `N` GPUs, make all `N` do useful experiment work
+   and choose the execution layout that returns the complete answer soonest. When a model replica fits on one GPU,
+   DDP is the default; tensor parallelism is not a substitute for data parallelism and is reserved for a model or
+   operation that cannot run per GPU.
+4. **One run, one answer** — One R### contains the complete baseline, treatment, required repetitions, controls, and
+   verdict-changing ablations for one hypothesis question. Workflow steps and partial conditions are not runs.
+5. **Bisect the hypothesis space** — A good delta splits uncertain beliefs in two. Even negative results are
+   progress if they eliminate a direction.
+6. **Shortest path to the experiment** — Audits, gates, refactors, and setup are supporting actions, not default
+   research runs. Scientific literature search is recovery-only: use it once after direct work fails and project
+   evidence cannot produce another direction, never before an executable experiment.
+7. **Plan just enough to start** — `PLAN.md` is a short editable guide. Cap planning, execute at minimal readiness,
+   and adapt during the run; plan completeness and plan conformance are never progress or stopping conditions.
+8. **Compression over narration** — STATE.md holds structured tables, not prose. Compress after every run.
+9. **Autonomy with crisp interrupts** — Default is *keep going*. Stop only on defined boundaries.
+10. **Single source of truth** — STATE.md is memory. Reports are the detailed record. SYNTHESIS.md is the human-facing interpretation. Everything else is derived.
+11. **One run, one published commit** — A cycle is not durable until its run-scoped files, state compression, and
    `.gitignore` updates are committed atomically and pushed to the configured research branch.
+
+### Plain-English communication contract
+
+Use the Feynman test for every human-facing summary, report opening, synthesis, and interrupt message: a technical
+colleague who has not followed the loop should understand it on the first read.
+
+1. **Answer first.** The first sentence says whether the result supports, contradicts, or cannot yet decide the
+   hypothesis. No preamble, process recap, or "I investigated..." opening.
+2. **Show concrete evidence.** Give the smallest set of exact numbers, comparisons, paths, or errors that justify
+   the answer. Prefer "5.48× faster at 1M items" to "a strong discriminating signal was observed."
+3. **Plain English before terminology.** Use real technical names when they add precision, but define an unfamiliar
+   term on first use in a short phrase. Never invent an acronym, framework label, or abstract noun for a simple idea.
+4. **Translate loop internals.** Terms such as `delta`, `frontier`, `evidence floor`, `paradigm`, `unblocker`, and
+   `belief movement` belong in internal state. Do not put them in the opening summary. Say "experiment," "next
+   test," "minimum evidence needed," "major assumption change," "required setup," and "confidence changed."
+5. **Keep the technical substance.** Name the exact model, dataset, metric, sample size, runtime, hardware, command,
+   or failure when relevant. Plain English means clear, not vague or non-technical.
+6. **Be short.** A result summary is at most 80 words. An interrupt message is normally at most 150 words plus a
+   command/error block when needed. Delete sentences that do not change the reader's understanding or decision.
+
+Feynman rewrite examples:
+
+- Bad: "The intervention yielded a discriminating signal and shifted the frontier."
+- Good: "At 95% duplicates, sorting was 5.48× faster, so this result supports the hypothesis for this Python setup."
+- Bad: "The causal mechanism remains confounded by implementation overlap."
+- Good: "Both tests use Timsort, so this experiment cannot tell which part of Timsort caused the speedup."
 
 ---
 
@@ -34,75 +75,104 @@ The human has already authorized the loop by telling you to run it.
 ### Phase 1: Read state
 
 Read `STATE.md`. Parse:
-- **BeliefState**: current beliefs, confidence, status, and literature-grounding status
-- **Ledger**: history of completed runs
-- **Frontier**: ranked candidate deltas
+- **BeliefState**: current beliefs, confidence, and status
+- **Ledger**: history of completed, decision-capable experiments
+- **Frontier**: ranked experiment questions with their complete evidence packages
+- **Direction-recovery state**: whether the one-shot literature recovery has already been used since the last
+  completed experiment
 - **Policy**: interrupt boundaries
 - **Environment**: env manager + activation (conda / mamba / uv / venv / pixi), paths, resources (pass to worker)
+- **Confirmed accelerator allocation**: exact human-approved GPU count, or unconfirmed/N/A. Never silently replace
+  it with the detected count.
 - **INFRA.md** (if exists): hardware profile, optimization playbook, storage topology (pass relevant sections to worker)
 - **Git state**: remote URL, current/default/research branches, upstream, and working-tree status. Record the
   pre-run HEAD. Confirm GitHub authentication/read access before expensive work. Never let unrelated dirty files
   leak into a run commit.
 
-Next run ID = highest Ledger run + 1 (or R001 if empty).
+Next run ID = highest Ledger run + 1 (or R001 if empty). Before selecting new work, check whether that ID already
+has `RUNS/R###/PLAN.md` plus `BLOCKER.md` but no Ledger row. That is a pending experiment, not an abandoned run.
+When the blocker is resolved, remove/replace the blocker note and resume the same plan, worker, and ID. If it is not
+resolved, trigger `BLOCKER` again; never allocate a new ID to step around it.
 
-### Phase 2: Select delta
+### Phase 2: Select one question and its complete experiment
 
-Pick the top-ranked non-blocked Frontier entry.
+Pick the fastest non-blocked experiment that can credibly support or contradict a named hypothesis in the human's
+goal. Do not create an R### for activity that cannot produce that answer.
 
-#### Mandatory Literature Grounding Gate
+#### Run admission and scope
 
-Every belief must have a `Literature` value in BeliefState:
+An R### is a **coherent evidence package for one scientific question**, not one command or one workflow step. Before
+creating it, state:
 
-- `pending` — no dedicated review has grounded the exact hypothesis wording
-- `grounded (R###, YYYY-MM-DD)` — a completed literature-review run covers this exact hypothesis
-- `refresh-needed` — the hypothesis changed materially or the review is no longer current enough for the decision
+1. the primary question and the result that would support versus contradict the hypothesis;
+2. the minimum complete evidence: baseline, treatment, sample/coverage, repetitions, and only essential controls or
+   ablations;
+3. the total wall-clock time to the answer: setup + queue + all required conditions + analysis;
+4. the first command.
 
-If the column is absent in an older STATE.md, add it at the next compression and treat every belief without a
-linked review artifact as `pending`. Project experiments, intuition, or a few citations in Scratch do not satisfy
-the gate.
+The package must be large enough to yield a credible conclusion and no larger. "Substantial" means
+decision-complete, not expensive or exhaustive. A five-minute benchmark is a valid run if it alone answers the
+question. A baseline, single seed, one configuration, smoke check, plot, or ablation is not a completed run when the
+claim requires the remaining conditions.
 
-**Eligibility rule:** an empirical, analysis, exploration, or engineering delta may target a belief only when its
-Literature value is `grounded (...)`. If it is `pending` or `refresh-needed`, the only eligible next delta for that
-belief is a `literature-review` run. The supervisor must create or promote that review entry ahead of empirical
-entries targeting the same belief.
+Keep all tightly related work under the same R###:
 
-Each literature-review run grounds exactly one hypothesis. Closely related beliefs may share sources, but each
-still gets its own review round and report so its evidence, novelty, and direction are independently auditable.
-When the wording or causal mechanism of a belief changes materially, mark it `refresh-needed`; cosmetic wording
-changes do not reopen the gate.
+- treatment and baseline;
+- required repetitions, folds, seeds, datasets, metrics, or configurations;
+- controls and ablations needed to rule out an explanation that could reverse the conclusion;
+- setup, data conversion, technical-documentation lookup, smoke checks, debugging, retries, and analysis.
 
-A literature-review run must answer:
+Do not split these into new run IDs. A worker may execute multiple commands or SLURM jobs inside one R###. A new
+R### is justified only by a different primary hypothesis question, not by the next stage of the same experiment.
 
-1. What primary evidence directly supports or contradicts this hypothesis?
-2. What adjacent evidence changes its plausibility without testing it directly?
-3. What is the closest prior work, and is the proposed contribution still novel?
-4. Which methods, datasets, metrics, checkpoints, prompts, or official code should be reused?
-5. What known failure modes, negative results, or alternative explanations should change the experiment?
-6. Should the hypothesis be kept, narrowed, reframed, deprioritized, or dropped?
+Generic literature review, experiment surveys, audits, gates, broad code review, cleanup, infrastructure polishing,
+and refactoring are not research runs. Necessary setup stays inside the selected experiment and is time-boxed to
+the smaller of 20% of its budget or 30 minutes. If the prerequisite still cannot be repaired, write
+`RUNS/R###/BLOCKER.md` from `templates/BLOCKER.template.md`, trigger `BLOCKER`, and keep the ID pending for resume. Do not write `REPORTS/R###.md`, append
+the Ledger, increment `total_runs`, or consume another run ID.
 
-Literature runs require current internet/database search unless an explicit offline constraint creates a BLOCKER.
-Prioritize primary sources (papers and official project/code pages); use reviews or surveys to discover primary
-work, not as the sole support for technical claims. Include the strongest contrary evidence and distinguish
-direct evidence from adjacent analogy and speculation. Record search date, query families, inclusion criteria,
-coverage limits, stable links/DOIs/arXiv IDs, and official code/data links. Do not pad a sparse literature with
-irrelevant citations.
+**Ranking** — prefer questions directly tied to the human's stated hypothesis. Exclude packages that cannot reach a
+credible conclusion within budget. Among the remaining packages, choose the shortest total wall-clock time to an
+answer, not the fewest GPU-hours. Include queue delay and run independent conditions concurrently when that preserves
+the scientific comparison. Break close ties by uncertainty in the target hypothesis. Do not build a scorecard or
+audit the candidate set.
 
-**Bandit reasoning** — for each candidate delta, assess three dimensions:
-
-1. **Uncertainty** (of the target belief): Confidence nearest 0.5 = `high`. 0.3-0.4 or 0.6-0.7 = `med`. Near supported/rejected = `low`.
-2. **Info gain** (expected discrimination): Would the result clearly push the belief? Check history for similar deltas. High discrimination potential = `high`.
-3. **Feasibility**: Quick and straightforward = `high`. Expensive or has failed approaches = `low`.
-
-Record all three in the Frontier table. Use judgment to rank — dimensions make reasoning auditable but don't combine into a formula. Prioritize high-uncertainty + high-info-gain, downrank low-feasibility.
+**Finish the package, then stop.** Run the highest-signal condition first, but do not close the run until the
+minimum complete evidence is present. Add an adaptive control or ablation only when the current evidence is unclear
+or a named alternative could reverse the conclusion. Once the question is credibly supported or contradicted, stop;
+do not pad the report with extra configurations, plots, or mechanism work. Never repeat until a preferred answer
+appears.
 
 If Frontier is empty, regenerate:
 - Find beliefs with confidence 0.3–0.7 (active, uncertain)
-- If all beliefs are resolved (supported/rejected), derive new ones: what follow-up questions do the resolved beliefs raise? Add them to BeliefState at 0.5.
-- For every new or ungrounded belief, add its one-belief literature-review delta before any empirical delta
-- Design deltas that would bisect uncertain beliefs: "if result is X, belief goes up; if Y, belief goes down"
-- Rank by expected discrimination
-- If no useful deltas possible AND no new beliefs can be derived → `AMBIGUITY` interrupt
+- If the human's target hypothesis is resolved with the minimum complete evidence and no explicitly requested goal remains,
+  trigger `GOAL`; do not invent follow-up hypotheses to keep the loop running.
+- Design experiments that split uncertain hypotheses: "if result is X, confidence goes up; if Y, it goes down"
+- Define the minimum complete evidence, then choose the shortest total time to an answer
+- Do not generate an exhaustive experiment list; keep only the few fastest decision-capable candidates
+- If project evidence still yields no useful experiment, apply the direction-recovery rule below. If recovery is not
+  eligible, was already used, or finds no executable direction → `AMBIGUITY` interrupt.
+
+#### One-shot literature direction recovery
+
+Scientific literature search is forbidden while any executable experiment exists. It is allowed only when all of
+these are true:
+
+1. At least one direct experiment has already failed scientifically or exhausted its direction (`null`, `unclear`,
+   or a result that rejects the working direction); setup inconvenience alone does not qualify.
+2. The Frontier is empty and regeneration from STATE.md, reports, and project artifacts produced no useful direct
+   experiment.
+3. `direction_recovery_used_since_experiment` is `false`.
+4. The search states one exact question whose answer should identify a relevant hypothesis, intervention, baseline,
+   or measurable outcome. "Review the field" and "find interesting papers" are invalid.
+
+The recovery is not an R###, not a Ledger row, not a belief update, and never an experiment-eligibility gate. Set
+`direction_recovery_used_since_experiment: true` before searching and record the question in STATE.md Scratch. Cap the
+search at 30 minutes and 8 relevant primary/official sources; stop earlier after finding 3 executable direct
+candidates. Write an optional L### recovery brief only if useful, then immediately translate the result into a
+Frontier entry with a decision result, minimum complete evidence, ETA, and entry point. If it yields no executable
+experiment, trigger `AMBIGUITY`. Never run a second literature recovery until new experimental evidence resets the
+flag to `false`; literature cannot justify more literature.
 
 ### Phase 3: Create run
 
@@ -110,91 +180,42 @@ If Frontier is empty, regenerate:
 mkdir -p RUNS/R###/artifacts
 ```
 
-Write `RUNS/R###/PLAN.md` using `templates/PLAN.template.md` as structure. Before handing it to the worker, copy
-the exact initial bytes to `RUNS/R###/PLAN.initial.md`. `PLAN.initial.md` is the immutable preregistration snapshot;
-`PLAN.md` is the live execution plan and may receive controlled amendments under the policy below.
+Write one `RUNS/R###/PLAN.md` using `templates/PLAN.template.md`. It is an editable working guide, not an immutable
+contract or a deliverable to perfect. Do not create `PLAN.initial.md`, a version history, or an approval gate.
 
-Every plan must include `## Literature Grounding`:
+Planning normally takes at most 5 minutes and has a hard cap of 10 minutes. Keep prose under 400 words excluding
+literal commands and scheduler configuration. Start execution as soon as the plan names:
 
-- For a `literature-review` run, name the one target belief, its exact wording, search questions, query families,
-  required counterevidence, implementation/code scan, and coverage standard. Use
-  `templates/LITERATURE.template.md` for the report. Literature runs do not need GPU allocation, smoke tests, or
-  plots unless the review includes a genuine quantitative meta-analysis. Declare the immutable archive path
-  `LITERATURE/B###/R###/` in Resources.
-- For every other run type, cite the exact grounding report `REPORTS/R###.md`, summarize how it changed the
-  design, and verify the target belief's Literature value is grounded. Missing grounding is a plan-time BLOCKER.
+1. the target hypothesis, primary question, support/contradict fork, and minimum complete evidence package,
+2. the first executable command and required resource paths,
+3. the estimated time to result, finish condition, time budget, and any real safety/irreversibility bound.
 
-**A good plan is substantive.** Each run is expensive — maximize information extracted per run. A plan should:
-- Have **multiple analysis steps** that build on each other (not just "run a script")
-- Spell out the **exact analysis logic** the worker should follow — what to compute, how to interpret it, what to look for
-- Include **fallback strategies** if the primary data source or approach doesn't work
-- Provide **rich context** from prior runs — specific findings, numbers, anomalies to investigate, not just "see R004"
-- Target **multiple related beliefs** when a single analysis can inform several
-- Define **clear success criteria** — what result would support vs contradict, with thresholds
-- Specify **exact resources** — checkpoint paths, dataset locations, which artifacts from prior runs to use. No ambiguity.
-- **Maximize hardware utilization** — read INFRA.md (if it exists) for the hardware profile and optimization playbook. Use it to design commands that fully utilize available hardware:
-  - **Parallelism**: use the strategy from INFRA.md Playbook → Parallelism (DDP, FSDP, etc.) and include the exact launch command in plan steps
-  - **Precision**: use the recommended dtype from INFRA.md Playbook → Precision (BF16, FP16, FP32) — specify explicitly in plan commands
-  - **Attention**: if Flash Attention or SDPA is available (check INFRA.md Playbook → Attention), specify it in the plan
-  - **Storage**: use paths from INFRA.md Storage → Guidance (fast scratch for checkpoints, large storage for data reads)
-  - **CPU-bound work**: parallelize across all cores (see INFRA.md Compute → CPU for core count)
-  - Specify device placement and parallelism explicitly in plan commands — don't leave it to the worker to figure out
-  - If INFRA.md doesn't exist, fall back to STATE.md Environment for basic GPU/CPU info
+Everything else is optional. Reuse STATE.md, INFRA.md, prior reports, and already-known implementation details
+without re-summarizing them. Do not do research, broad context collection, fallback enumeration, an audit, or a
+literature search in order to finish a plan. A single targeted technical-documentation question may remain in the
+working plan, but execution must still reach the measurement in the same run.
 
-**SLURM execution** — if INFRA.md `Job Execution → mode` is `slurm`:
-- Include a `## SLURM` section in the plan with walltime estimate, GPU count, memory, and partition
-- The worker will generate a standalone `experiment.py` + `job.sh`, submit via `sbatch`, and monitor via `scripts/wait_for_job.sh`
-- Plan commands must be self-contained — everything the compute node needs should be in experiment.py (no interactive shell commands)
-- Specify `execution mode: slurm` in Resources so the worker knows which path to follow
-- **GPU count** — request the minimum needed, not the maximum available. More GPUs = longer queue wait.
-  - **Model fits on 1 GPU** (inference, small fine-tune, analysis): request 1 GPU
-  - **Training benefits from data parallelism** (large dataset, long training): request GPUs per INFRA.md Parallelism guidance
-  - **Model doesn't fit on 1 GPU** (FSDP/ZeRO needed): request the minimum GPUs for the model to fit
-  - When in doubt, start with fewer GPUs — queue time matters more than marginal speedup
+For SLURM, record only execution mode, exact launch command, partition, walltime, memory, and the human-confirmed
+GPU count. The worker creates the scripts and handles operational detail during execution. Once confirmed, the
+count is an execution requirement: allocate and actively use all of those GPUs.
 
-Fill in:
-- Delta: what to change, why, what belief(s) it targets
-- Literature Grounding: this run's review protocol, or the prior grounding report and design implications
-- Commands: detailed step-by-step analysis (multiple steps, not a single command)
-- Resources: exact paths to checkpoints, data, prior artifacts (from STATE.md Environment + prior runs). Include `execution mode: direct | slurm` (from INFRA.md Job Execution)
-- Success metrics: what to measure, with baselines and targets
-- Stop conditions: when to halt
-- Context: relevant beliefs, prior findings with specific numbers, data file paths
+#### Working-plan adaptation
 
-#### Controlled plan amendments
+The worker may edit `PLAN.md` directly at any time and continue the same run. Command, path, batching, compute,
+resource, retry, and intermediate-analysis changes need no classification, approval, version bump, or log entry.
+The plan guides work; it does not block work.
 
-Plans are commitments, not brittle scripts. Preserve the initial scientific intent in `PLAN.initial.md`, while
-allowing the live `PLAN.md` to be repaired in the same run. A trivial bug must not force a new run.
-
-Classify a proposed change before making it:
-
-1. **Class A — worker-autonomous repair**: typographical errors; broken commands; stale but identity-equivalent
-   paths; import/API/version mismatches; serialization or schema bugs; logging/plot/report formatting; retry,
-   timeout, batching, worker-count, or memory adjustments; deterministic seed plumbing; and corrections to metric
-   implementation that retain the preregistered estimand and recompute every affected arm. The worker fixes these
-   directly, updates `PLAN.md`, increments `plan_version`, and appends an Amendment Log row. Continue the same run.
-2. **Class B — supervisor-approved, scope-preserving amendment**: an equivalent resource substitution, material
-   schedule/compute reallocation within the recorded budget, or a method change that preserves the target belief,
-   causal contrast, dataset/model family, primary endpoint, and success criterion. The worker emits
-   `AMENDMENT_NEEDED` with the proposed diff and evidence; the supervisor may amend the live plan and resume the
-   same worker/run. This is not automatically a BLOCKER and does not require human approval unless another
-   interrupt boundary applies.
-3. **Class C — scientific redesign**: changing the target belief, main causal estimand/intervention, primary
-   model or dataset family, primary endpoint or its success threshold after seeing outcomes, preregistered
-   prediction after outcome inspection, or budget/irreversibility boundary. Do not amend this into the current
-   run. Preserve the evidence gathered, write a BLOCKER or completed pilot report as appropriate, and create a
-   newly planned run. Obtain human input only when an interrupt boundary actually requires it.
-
-Every change to the live plan must be auditable: preserve `PLAN.initial.md`; append rather than rewrite the
-`## Amendment Log`; record timestamp, actor, class, issue/evidence, exact before → after change, and why the
-scientific interpretation is unchanged; and summarize amendments in the report. Never lower a target, swap the
-primary outcome, delete an arm, or revise a prediction because observed results are inconvenient. If a metric bug
-is repaired after partial execution, retain the raw outputs and recompute all comparable cells.
+Use `## Working notes` only for a material change to the scientific comparison or interpretation after execution
+starts. Append one sentence stating when, what changed, why, and whether results were already visible. Never erase
+raw outcomes or describe an outcome-driven change as preregistered. If the target belief or primary decision metric
+changes after outcomes are visible, label the affected result exploratory; finish the useful measurement or hand
+the new direct experiment to the next cycle. Stop only at an actual interrupt boundary, not because the plan changed.
 
 ### Phase 4: Spawn worker
 
-Read the plan's Delta type. For `literature-review`, assemble the Literature Review Worker Prompt (Section 4B).
-For all other types, assemble the Experiment Worker Prompt (Section 4A). Spawn one worker.
+Assemble the Experiment Worker Prompt (Section 4) and spawn one worker. The complete experiment and its necessary
+supporting steps stay with the same worker under the same run ID. A successful command or `[DELTA-DONE]` marker does
+not complete the run while another planned condition, control, ablation, or analysis remains.
 
 **Agent-specific spawning:**
 - **Claude Code**: `Task(subagent_type="general-purpose", model="sonnet",prompt=<worker prompt>)`
@@ -207,47 +228,47 @@ For all other types, assemble the Experiment Worker Prompt (Section 4A). Spawn o
 multi_agent = true
 
 [agents.worker]
-description = "Research worker: executes one plan, fixes logged Class A execution bugs in live PLAN.md, writes a structured report, and never modifies STATE.md or PLAN.initial.md."
+description = "Research worker: uses the editable PLAN.md as a short guide, adapts it while executing, writes a structured report, and never modifies STATE.md."
 ```
 
 ### Phase 5: Ingest report
 
 Read `REPORTS/R###.md`. Extract:
-- Summary (what was done, what was found)
-- Results with inline data
-- Signal: discriminating / partial / null
-- Verdict: supports / contradicts / unclear / BLOCKER
-- Which belief was affected
-- Confounds
-- New hypotheses
-- Suggested next deltas
-- Plan amendments: version, repair class, why they were scope-preserving, and whether any result was observed
-  before each amendment
-- If this was a literature review: search coverage, evidence map, closest prior work, reusable assets, grounding
-  verdict, recommended direction, and whether the empirical gate is open
-- Verify the durable archive exists at `LITERATURE/B###/R###/`, contains `REVIEW.md`, `queries.md`, `evidence.csv`,
-  and `sources.bib` (or a complete linked-source fallback), and that `REVIEW.md` is byte-identical to
-  `REPORTS/R###.md`
+- Answer: supports, contradicts, or cannot decide, with the decisive number
+- Motivation and the primary question tested
+- Method: approach, data, comparisons, metrics, repetitions, environment, parallel execution, and material scientific changes
+- Experiments: main comparison plus each necessary control or ablation
+- Results with all decision-relevant data inline, launch-to-result wall-clock time, and useful-GPU evidence when applicable
+- Analysis: why the evidence answers each stated question
+- Limitations and exact tested scope
+- Conclusion: affected belief, proposed confidence change, and at most one next experiment for the same unresolved
+  question
+- Reproducibility command, metrics, and artifacts
+
+Verify that the package is complete enough for its stated conclusion. The report must contain a new measurement and
+connect it to the target hypothesis. A source summary, check, setup step, baseline alone, single seed, one condition,
+plot, or ablation is not a completed run when the planned answer requires more. Do not accept several trivial
+reports in place of the coherent experiment defined in PLAN.md.
+
+If execution is blocked before decision-capable evidence exists, there is no research report to ingest. Read
+`RUNS/R###/BLOCKER.md`, record the exact blocker in STATE.md Scratch, and interrupt without changing the Ledger,
+beliefs, `total_runs`, or run ID.
 
 ### Phase 6: Compress state
 
 Update STATE.md (see Section 5 for rules):
 - Append to Ledger
-- Update BeliefState confidence and status based on the evidence
-- Add new beliefs from report
-- If this was a literature review, set the exact target belief to `grounded (R###, date)` after verifying the
-  report satisfies the literature contract; otherwise leave it pending and treat the report as BLOCKER/unclear
-- Update `LITERATURE/INDEX.md` for the target belief with the exact hypothesis, latest review, date, evidence
-  verdict, recommended direction, archive path, and run-report path. Initialize it from
-  `templates/LITERATURE_INDEX.template.md` if absent. Never overwrite prior review directories.
-- Update Frontier: remove completed delta, consider adding suggested next deltas
+- Update BeliefState confidence/status from the complete experiment
+- Update Frontier: remove the completed question; add at most one fastest adequate next test only for an unresolved
+  explicit goal, otherwise leave it empty and trigger `GOAL`
 - Check for paradigm shift (Section 5): if any belief was rejected or dropped ≥0.3, cascade to children
-- **Update SYNTHESIS.md** if: (1) paradigm shift this cycle, (2) a belief reached supported/rejected, or (3) 5+ runs since last update. If SYNTHESIS.md doesn't exist, create from template. Write for a human who hasn't followed the loop.
+- **Update SYNTHESIS.md briefly** if: (1) paradigm shift this cycle, (2) the target reached supported/rejected, or
+  (3) 5+ runs since last update. Record the result, adequacy, and scope; do not expand into a new review.
 - Update Meta (run count, date)
 
 #### Phase 6b: Curate, commit, and push the completed run
 
-Phase 6b is mandatory for every completed experimental or literature-review run. Human authorization to commit
+Phase 6b is mandatory for every completed run. Human authorization to commit
 and push must be recorded in project instructions or obtained explicitly; initialization should ask for it. If
 authorization is absent, stop at `IRREVERSIBLE` before the first commit/push. Never infer permission to publish.
 
@@ -259,8 +280,8 @@ authorization is absent, stop at `IRREVERSIBLE` before the first commit/push. Ne
 2. **Manage `.gitignore`**:
    - Ignore secrets, environment directories, caches, wandb internals, raw logs, checkpoints, generated model
      weights, and large transient outputs.
-   - Keep both the immutable initial plan and the final live plan, reports, source/scripts, lightweight structured
-     metrics, and report-linked plots under version control.
+   - Keep the final working plan, reports, source/scripts, lightweight structured metrics, and report-linked plots
+     under version control.
    - Inspect sizes before staging. Do not push files ≥100 MiB to ordinary GitHub Git; normally keep generated
      artifacts below 50 MiB, add run-specific ignore rules for larger reproducible outputs, and document their
      external/storage path in the report. Do not introduce Git LFS without explicit authorization.
@@ -268,16 +289,15 @@ authorization is absent, stop at `IRREVERSIBLE` before the first commit/push. Ne
    - Run relevant tests plus `git diff --check`.
    - Inspect `git diff --cached --stat`, `git diff --cached --name-only`, and the staged diff for secrets,
      accidental data, unrelated edits, and missing run artifacts.
-   - Required scope normally includes `RUNS/R###/PLAN.initial.md`, `RUNS/R###/PLAN.md`, run scripts and lightweight metrics/artifacts,
-     `REPORTS/R###.md`, literature archive + index for review runs, `STATE.md`, triggered `SYNTHESIS.md`, and any
+   - Required scope normally includes `RUNS/R###/PLAN.md`, run scripts and lightweight metrics/artifacts,
+     `REPORTS/R###.md`, `STATE.md`, triggered `SYNTHESIS.md`, and any
      shared code/config/`.gitignore` intentionally changed by the run.
 4. **Use a non-default research branch**:
    - If currently on the repository's default branch, create/switch to the configured research branch before the
      commit. Do not commit run work directly to the default branch.
    - Reuse the existing research branch on later cycles; never force-push or rewrite published run history.
 5. **Commit atomically**:
-   - Experimental/analysis run: `research(R###): <concise delta>`
-   - Literature run: `literature(R###): ground belief #N`
+   - Completed experiment: `research(R###): <concise question>`
    - One completed run should map to one primary commit containing plan → execution evidence → report → state
      compression. Do not create empty commits.
 6. **Push and verify**:
@@ -307,7 +327,7 @@ Agent-specific:
 
   ```bash
   # Schedule next cycle in 30 minutes (adjust delay as needed)
-  echo "cd $(pwd) && codex exec --full-auto 'continue research loop — read STATE.md and proceed from Phase 1'" \
+  echo "cd $(pwd) && codex exec --approve-for-me 'continue research loop — read STATE.md and proceed from Phase 1'" \
       | at now + 30 minutes
   ```
 
@@ -332,39 +352,42 @@ Agent-specific:
 - Re-run environment agent to update after hardware changes (new GPUs, moved to cluster, etc.)
 
 ### PLAN.md (per run)
-- **Owner**: Supervisor creates the initial/live pair; Worker may edit only the live plan under Class A
-- `PLAN.initial.md` is the immutable preregistration snapshot; `PLAN.md` is the versioned, amendable execution plan
-- Must specify exact resource identities and paths; identity-equivalent path repairs are Class A, resource
-  substitutions are Class B or C depending on scientific impact
-- A plan problem triggers repair or `AMENDMENT_NEEDED` before BLOCKER; only Class C redesign or an interrupt
-  boundary requires ending the run
+- **Owner**: Supervisor creates it; Worker may edit it freely while executing
+- One short `PLAN.md` only. It is a working guide, not an immutable record, approval workflow, or run-completion gate
+- Planning is normally at most 5 minutes, never more than 10 minutes, and under 400 prose words
+- It needs only the question/finish line, complete evidence package, first command, exact resources, and bounds
 
 ### REPORT.md (per run)
 - **Owner**: Worker creates, Supervisor reads
-- Experimental runs follow `templates/REPORT.template.md`; literature-review runs follow
-  `templates/LITERATURE.template.md`
+- All runs follow `templates/REPORT.template.md`
 - **Must be human-readable** — a researcher should understand what happened by reading just the report
+- Uses a compact research-paper scaffold: Answer, Motivation, Questions tested, Method, Experiments, Results,
+  Analysis, optional Ablations, Limitations, Conclusion, and Reproducibility
 - All data inline — numbers, tables, key outputs in the report itself, not just pointers to JSON files
-- Visualizations embedded with `![description](path)` — generate plots for numerical experimental results;
-  literature reviews may use a structured evidence table without a plot
-
-### LITERATURE archive
-- **Worker**: writes versioned review files under `LITERATURE/B###/R###/`
-- **Supervisor**: validates the archive and updates `LITERATURE/INDEX.md` during compression
-- `REVIEW.md` must be byte-identical to `REPORTS/R###.md`; Git stores identical content as one blob
-- `queries.md`, `evidence.csv`, and `sources.bib` preserve reproducible search and machine-readable grounding
-- Reviews are immutable. Refreshes create a new run subdirectory and update the index; never overwrite history.
+- Visualizations are optional; use at most one only when a table or scalar cannot communicate the verdict clearly
 
 ### SYNTHESIS.md
 - **Owner**: Supervisor
 - **Worker**: no access
 - Updated after paradigm shifts, belief resolutions, or every 5 runs
-- Human-facing — readable without STATE.md context
+- Human-facing — follow `templates/SYNTHESIS.template.md`: answer first, exact evidence, plain English, tested scope,
+  one verdict-changing limitation, and at most one next step
 
 ### Supervisor NEVER
+- Selects a standalone literature review, generic audit/gate, speculative survey, cleanup, or refactor as a run
+- Searches scientific literature before experimental work fails, while an executable direction exists, or more than once
+  between completed experiments
+- Creates a separate run for setup, a smoke test, debugging, a retry, one seed, one condition, one metric, one
+  baseline, one control, one ablation, plotting, or analysis belonging to the same hypothesis question
+- Accepts a partial sub-result as a completed run when the planned conclusion requires the rest of the evidence package
+- Chooses a faster but scientifically inadequate probe, or a slower/more elaborate test when a faster adequate one exists
+- Continues collecting configurations, repetitions, controls, plots, or analysis after the complete evidence package
+  resolves the question
+- Invents new beliefs or follow-up experiments after the human's target hypothesis is decided
 - Parses raw logs or debugs mid-run
-- Silently rewrites `PLAN.initial.md`, the Amendment Log, predictions, primary endpoints, or success thresholds
-- Forces a new run for a Class A repair that the worker can resolve locally
+- Creates `PLAN.initial.md`, plan versions, change classes, approval gates, or amendment audits
+- Spends more than 10 minutes planning or delays execution to make a plan comprehensive
+- Forces a new run merely because commands, methods, resources, or the working plan changed
 - Skips state compression
 - Runs experiments directly (always spawn a worker)
 - Manages environment directly (spawn environment agent)
@@ -373,9 +396,8 @@ Agent-specific:
 
 ### Worker NEVER
 - Modifies STATE.md
-- Modifies `PLAN.initial.md`, or changes `PLAN.md` outside the controlled amendment policy
-- Chooses new research directions (suggests only via "New hypotheses" and "Next tests" in report)
-- Silently substitutes a scientifically different checkpoint, dataset, intervention, or endpoint
+- Chooses a new research direction; a report may name at most one experiment needed to answer the same unresolved question
+- Hides observed results or presents an outcome-driven scientific change as if it was planned earlier
 - Ignores stop conditions
 - Commits, pushes, changes branches, or edits `.gitignore`; Git publication belongs to the supervisor after state
   compression
@@ -384,7 +406,7 @@ Agent-specific:
 
 ## 4. Worker Prompt Templates
 
-### 4A. Experiment Worker Prompt Template
+### Experiment Worker Prompt Template
 
 > Supervisor fills `{PLAN_CONTENT}`, `{RUN_ID}`, `{ENV_SETUP}`, and `{INFRA_PLAYBOOK}` before spawning.
 > `{ENV_SETUP}` comes from the Environment section of STATE.md.
@@ -412,41 +434,75 @@ If a package is missing, install it using the project's env manager (`pip instal
 ## Contract (strict)
 
 - NEVER modify STATE.md
-- NEVER modify `PLAN.initial.md`. You MAY repair the live `PLAN.md` under the Controlled plan amendments policy:
-  fix Class A issues locally, increment `plan_version`, append the Amendment Log, and continue the same run.
-  For Class B, emit `AMENDMENT_NEEDED` with an exact proposed diff for supervisor approval. Class C is BLOCKER.
-- NEVER choose new research directions (suggest via "New hypotheses" and "Next tests" only)
-- Use the resource identities specified in the live plan. Repair an identity-equivalent path locally; do not
-  silently substitute a different model, dataset, or intervention.
-- If any stop condition triggers, immediately report verdict = BLOCKER
-- Null results are valuable — report honestly
-- Verify the plan's `## Literature Grounding` cites a completed review for every target belief. Missing or pending
-  grounding is a BLOCKER; do not begin the experiment.
+- Treat `PLAN.md` as an editable working guide. Change commands, paths, compute, resources, and analysis directly;
+  do not ask for plan approval or stop merely because the plan changed.
+- Add one short Working note only when the scientific comparison or interpretation materially changes. State
+  whether results were already visible; never erase outcomes or claim an outcome-driven choice was made earlier.
+- NEVER choose a new research direction. Name a next experiment only when the same primary question remains unresolved.
+- Start from the resources in the working plan, but substitute or repair them directly when execution requires it.
+  Note a substitution only if it materially changes scientific interpretation.
+- If a real stop condition triggers before the evidence package is complete, write `RUNS/{RUN_ID}/BLOCKER.md`
+  using `templates/BLOCKER.template.md`. Include the exact error, attempts, missing prerequisite, and resume command.
+  Do not write a research report.
+- A result that cannot decide is still useful — report it honestly after the planned evidence package is complete.
+- Execute the plan's `## Evidence package`. Reach the hypothesis answer; do not replace it with reading, auditing,
+  setup, refactoring, validation, or a trivial subset of planned conditions.
+- Keep baseline, treatment, repetitions, necessary controls/ablations, retries, and analysis in this same run. Run
+  the highest-signal condition first, but do not close the run until the minimum complete evidence is present.
+- Add an adaptive condition only when the current result is unclear or a named alternative could reverse the
+  conclusion. Stop once the stated claim is answered; do not pad the run or repeat until a preferred answer appears.
+- Follow the Plain-English communication contract. Put the scoped answer and decisive number in the first sentence;
+  keep internal loop vocabulary out of the Answer and define necessary technical terms on first use.
+- Keep any technical-documentation lookup or smoke test within its stated time box. Do not start scientific
+  literature search inside a worker plan. A passing smoke test is permission to continue, not a completed run.
 
 ## Hardware utilization
 
 Follow the Hardware & Optimization playbook above. Specifically:
 - **Precision**: use the recommended dtype. Wrap training/inference in the recommended autocast context.
 - **Attention**: use the recommended attention mechanism (Flash Attention, SDPA, or standard).
-- **Parallelism**: use the recommended strategy and launch command. If the plan specifies DDP, use `torchrun` as shown.
+- **Wall-clock objective**: minimize elapsed time from launch to the complete hypothesis answer. GPU-hours are a
+  secondary accounting metric, not the optimization target.
+- **Confirmed GPU count**: if the human approved `N` GPUs, allocate exactly `N` and make every GPU process useful
+  samples, batches, or independent experiment conditions. Do not leave confirmed GPUs idle and do not create
+  synthetic work merely to make utilization look high.
+- **DDP first**: when the model and optimizer state fit on one GPU and work can be split by samples or batches, use
+  DistributedDataParallel across all `N` GPUs with `torchrun --nproc_per_node=N` for training. For evaluation or
+  inference, use the same `N` data-parallel ranks to shard independent examples; a DDP wrapper is unnecessary when
+  there are no gradients. Combine rank-local metrics correctly and account for sampler padding so examples are not
+  double-counted.
+- **No needless tensor parallelism**: do not choose tensor parallelism when DDP can execute the same experiment.
+  Use tensor/model sharding only when one replica cannot fit on one GPU or the required operation cannot be divided
+  into independent per-GPU work; state that exact reason in the plan and report.
+- **Fill all GPUs with the fastest useful layout**: when independent arms, seeds, or conditions finish sooner by
+  running concurrently than by one DDP job, schedule them concurrently under the same R###. If runtime or throughput
+  is itself the measured outcome, avoid resource contention that would bias it and instead run each condition with
+  the same all-GPU layout.
+- **Useful utilization evidence, not a gate**: during the real run, record total wall-clock time, throughput, and a
+  lightweight per-rank sample/batch count (plus peak memory or sampled GPU utilization when already available).
+  Confirm all `N` ranks did real work in the report. Do not create a separate utilization audit or readiness gate.
 - **Storage**: write checkpoints and large intermediates to the fast scratch path. Read data from the dataset path.
 - For CPU-bound work, parallelize across all available cores.
 - The plan specifies device placement — follow it. If unspecified, use the playbook defaults.
-- If no Hardware & Optimization section is provided, use all available GPUs and default to FP32.
+- If GPU work is selected and no approved count appears in the human request, STATE.md, INFRA.md, or the current
+  plan, ask for that one number before reserving GPUs; do not run a hardware audit. CPU-only work can continue.
 
 ## Execution
 
-**Check the plan's Resources section for `execution mode`.**
+**Check the plan's Method and resources section for `execution`.**
 
 - **mode = direct** (default): Execute commands directly in the shell.
 - **mode = slurm**: Generate experiment.py + job.sh, submit via sbatch, monitor with `scripts/wait_for_job.sh`. See `templates/OBSERVABILITY.md` → SLURM Execution Workflow for the full procedure. Do NOT manually poll `squeue` — `wait_for_job.sh` handles monitoring.
 
-**Smoke test before hero run** (when the plan has a `## Smoke Test` section): generate `experiment_smoke.py` + `job_smoke.sh` from the smoke config, submit to the fast-queue partition, validate VRAM and throughput, refine the hero walltime if needed. Only submit the hero run after the smoke passes. See OBSERVABILITY.md → Step 0.
+**Smoke test before the main experiment** (only when the plan has a non-empty optional smoke test for a concrete costly-run
+risk): keep it within 10% of the run budget, then immediately continue to the measurement when it passes. In SLURM
+mode generate `experiment_smoke.py` + `job_smoke.sh`; see `templates/OBSERVABILITY.md` → Step 0.
+The smoke test and evidence package are one run. Never write the final report or return success after only the smoke
+test passes.
 
 **Failure recovery is part of the run.** If a command fails or the SLURM job exits non-zero: read the logs,
-diagnose, repair Class A issues in the live plan/code, and re-run. Iterate up to 2-3 times. Emit
-`AMENDMENT_NEEDED` for a Class B change. Escalate to BLOCKER only for Class C redesign, an exhausted repair, or a
-defined interrupt boundary. See `templates/OBSERVABILITY.md` → Step 5 for SLURM-specific recovery patterns.
+diagnose, edit the working plan/code as useful, and re-run. Iterate up to 2-3 times. If repair is exhausted, write
+`RUNS/{RUN_ID}/BLOCKER.md` and stop without a research report or completed run. See `templates/OBSERVABILITY.md` → Step 5.
 
 For both modes, follow `templates/OBSERVABILITY.md`:
 - Set up the run directory: `mkdir -p RUNS/{RUN_ID}/logs RUNS/{RUN_ID}/metrics RUNS/{RUN_ID}/artifacts`
@@ -459,138 +515,74 @@ For both modes, follow `templates/OBSERVABILITY.md`:
 Write your report to REPORTS/{RUN_ID}.md. The report must be HUMAN-READABLE — a researcher should understand what happened by reading it alone.
 
 ### Report rules:
-- Start with a plain-language summary (what you did, what you found, what it means)
+- Follow `templates/REPORT.template.md`. Write a compact research paper, not an activity log.
+- Start with an answer-first plain-English Answer of at most 80 words: scoped answer, decisive evidence, meaning,
+  and only the limitation most likely to change it.
+- Do not use internal terms such as delta, frontier, evidence floor, paradigm, unblocker, belief movement, or
+  discriminating signal in the Answer.
 - Put ALL data inline — numbers, tables, key values directly in the report. Do NOT just point to JSON files.
 - Use data from `RUNS/{RUN_ID}/metrics/` as the authoritative source for tables and plots
-- Generate visualizations. **All plots MUST be saved to `RUNS/{RUN_ID}/artifacts/<filename>`, never under `REPORTS/`.** When the plan lists bare filenames (e.g. `r101_loss.png`), prepend `RUNS/{RUN_ID}/artifacts/` — the plan's `output dir` is the authoritative destination, the bare filename is just a label. Embed with `![description](../RUNS/{RUN_ID}/artifacts/filename.png)` (the `../` is required because the report lives in `REPORTS/` and `RUNS/` is its sibling).
-- Include your analysis — why do the results look this way? What's the interpretation?
-- The structured sections (Signal, Verdict, etc.) come AFTER the human-readable content
+- Do not generate a plot by default. Use at most one only when it materially clarifies the decision; save it to
+  `RUNS/{RUN_ID}/artifacts/<filename>` and embed it as `![description](../RUNS/{RUN_ID}/artifacts/filename.png)`.
+- Keep analysis to what is needed to justify the conclusion; mechanism speculation is optional.
+- Show the main comparison and every necessary control or ablation as one coherent experiment package.
+- Do not propose a new research direction. At most one next experiment is allowed when the same question remains
+  unresolved; otherwise write None.
 
 ### Report structure:
 
-# REPORT — {RUN_ID}
+# REPORT — {RUN_ID}: <plain-English question>
 
-## Summary
-(2-3 sentences: what was tested, what was found, what it means for the research question)
+## Answer
+<supports, contradicts, or cannot yet decide; decisive number; meaning; one limitation; at most 80 words>
 
 ## Motivation
-(Why this experiment? What belief is being tested? What would support vs contradict?)
+<why the question matters and what was uncertain>
+
+## Questions tested
+1. **Primary:** <question and decision threshold>
+2. **Secondary, if needed:** <only a question required to interpret the primary result>
 
 ## Method
-(What was done, step by step — enough that a human could reproduce)
+<approach, data, comparisons, metrics, repetitions, environment, parallel execution, and material scientific changes>
+
+## Experiments
+| Experiment | Why it is needed | Comparison / conditions |
+|------------|------------------|-------------------------|
+| Main test | Answers the primary question | <baseline vs treatment> |
+| <control/ablation if needed> | <alternative ruled out> | <conditions> |
 
 ## Results
+| Experiment / condition | Primary result | Uncertainty / repetitions | Meaning |
+|------------------------|----------------|---------------------------|---------|
+| <condition> | <number> | <spread / N> | <interpretation> |
 
-### Data
-(Inline tables with actual numbers. ALL key metrics here, not in separate files.)
+- **wall-clock to answer:** <launch-to-complete-results time; include queue/setup when known>
+- **GPU use, if applicable:** <N/N confirmed GPUs; per-rank work and throughput; peak memory or sampled utilization when already available>
 
-| Metric | Value | Notes |
-|--------|-------|-------|
-(every important measurement)
+## Analysis
+<direct answers to the questions and why the evidence supports them>
 
-### Visualizations
-(Generate plots. Embed them. Path is relative to REPORTS/{RUN_ID}.md, so use `../RUNS/...`.)
-![description](../RUNS/{RUN_ID}/artifacts/plot_name.png)
+## Ablations (optional)
+<only verdict-changing ablations; delete when none>
 
-### Analysis
-(Interpret the results. Why do they look this way? What patterns do you see? What's surprising?)
+## Limitations and tested scope
+<exact scope and only limitations that could reverse the conclusion>
 
-## Signal
-- **discrimination**: (discriminating | partial | null)
-- (why — what did we learn or fail to learn?)
-- (key observation that might matter for future runs)
+## Conclusion
+- **answer:** <supports | contradicts | cannot decide> hypothesis/belief #N
+- **decisive evidence:** <exact result>
+- **confidence:** <before → proposed after, with reason>
+- **next experiment:** <None, or one experiment for the same unresolved question>
 
-## Verdict
-**<supports | contradicts | unclear | BLOCKER>** — belief #N: <how this evidence affects the belief>
-
-## Confounds
-- (what else could explain the result?)
-
-## New hypotheses
-<!-- Did this run reveal something that suggests a NEW belief to track? -->
-- (new hypothesis, if any, with reasoning)
-
-## Next tests
-1. (delta that would further discriminate, and why)
-2. (alternative approach if this direction is exhausted)
-3. (wild card — something unexpected this run suggested)
-
-## Artifacts
-- `artifacts/<file>` — <what it contains>
+## Reproducibility
+- **parallelism:** <launcher, world size, and global/per-device batch or condition placement>
+- **command:** <exact command or job ID>
+- **metrics:** <path>
+- **artifacts:** <only useful paths>
 
 ## Meta
-- **run_id**: {RUN_ID}
-- **delta**: (what was tested)
-- **started**: (timestamp)
-- **completed**: (timestamp)
-- **status**: completed | failed | blocked
-- **execution**: (direct | slurm)
-- **slurm_job_id**: (job ID, if slurm)
-- **wandb_run**: (wandb run URL, if applicable)
-```
-
-### 4B. Literature Review Worker Prompt Template
-
-> Use this prompt only when `PLAN.md` has `type: literature-review`. The review is a real run: it gets an R### ID,
-> preserved initial plan, amendable live plan, report, Ledger row, and state compression, but it does not execute
-> the proposed experiment.
-
-```
-You are a research Worker executing one literature-grounding run: {RUN_ID}.
-
-## Environment
-
-The project root and research state are available in the current workspace. Read the preserved initial plan and
-the current live plan; use only the target belief and search scope authorized there. Internet/database search is required unless the plan records
-an offline constraint; if current search is impossible, write a BLOCKER report rather than relying on memory.
-
-## Your plan
-
-{PLAN_CONTENT}
-
-## Contract (strict)
-
-- NEVER modify STATE.md, SYNTHESIS.md, or `PLAN.initial.md`. Class A repairs to live `PLAN.md` are allowed and
-  must be versioned in its Amendment Log; Class B requires `AMENDMENT_NEEDED`; Class C is BLOCKER.
-- Review exactly one target hypothesis. Do not silently broaden or replace it.
-- Do not run the proposed empirical experiment. Small deterministic checks that only verify a paper, repository,
-  dataset, or metric are allowed when the plan authorizes them.
-- Search multiple query families: exact hypothesis/phenomenon, proposed mechanism, and methodological or failure-
-  mode terms. Follow citation trails in both directions for the key sources.
-- Prioritize primary sources and official code/data. A survey can organize the field, but trace decisive claims to
-  original papers. Read enough methods/results to assess what was actually tested; abstracts alone are not enough
-  for key evidence.
-- Seek and report the strongest contrary or null evidence. Distinguish direct tests, adjacent evidence, conceptual
-  analogy, and speculation.
-- Record search date, databases/search engines, exact query strings, inclusion/exclusion criteria, and coverage
-  limits. Usually include at least five relevant primary sources when the field contains them; document sparse
-  literature rather than padding the count.
-- Give stable direct citations (DOI, arXiv, publisher/conference page, or official repository URL) for every key
-  claim. Never cite a search-results page.
-- Identify reusable official code, data, measures, prompts, checkpoints, baselines, and evaluation protocols.
-- End with an actionable direction: keep, narrow, reframe, deprioritize, or drop the hypothesis, and explain how
-  the first empirical plan should change.
-- New hypotheses may be suggested only in the report. Each will enter STATE.md as literature=pending and require
-  its own future review round.
-
-## Output
-
-Write the full review using `templates/LITERATURE.template.md` exactly to both:
-
-- `REPORTS/{RUN_ID}.md`
-- `LITERATURE/B{BELIEF_ID_PADDED}/{RUN_ID}/REVIEW.md`
-
-The two files must be byte-identical. Also write:
-
-- `LITERATURE/B{BELIEF_ID_PADDED}/{RUN_ID}/queries.md` — exact query log, database/search engine, date, result
-  screening, and inclusion/exclusion notes
-- `LITERATURE/B{BELIEF_ID_PADDED}/{RUN_ID}/evidence.csv` — one row per included source with citation, stable URL,
-  source type, relationship, tested claim, finding, limitations, and code/data URL
-- `LITERATURE/B{BELIEF_ID_PADDED}/{RUN_ID}/sources.bib` — BibTeX where available; if BibTeX is unavailable, store
-  a complete linked citation list in this file and state the fallback format at the top
-
-Put the evidence map and source list inline in the review as well, so it remains independently auditable. Save
-optional plots or auxiliary extraction artifacts under `RUNS/{RUN_ID}/artifacts/` and list them in the review.
+<run ID, timestamps, execution mode, SLURM job ID, wandb URL>
 ```
 
 ---
@@ -603,19 +595,20 @@ optional plots or auxiliary extraction artifacts under `RUNS/{RUN_ID}/artifacts/
 ### Ledger
 Append one row:
 ```
-| R### | <delta> | <signal> | <verdict> | #N | [link](REPORTS/R###.md) |
+| R### | <question> | <decisive result> | <supports|contradicts|cannot decide> | #N | [link](REPORTS/R###.md) |
 ```
 
-### BeliefState — update existing
-If the BeliefState table lacks a Parent column, treat all beliefs as root. If it lacks a Literature column, treat
-beliefs without a dedicated linked review as pending. Add both columns on the next compression.
+Append only after a coherent experiment is complete. Partial conditions, setup, repairs, blocked attempts, and
+standalone analysis do not enter the Ledger or increment the run count.
 
-Read the report's verdict and evidence. Judge:
-- **supports + discriminating**: meaningful increase in confidence
-- **supports + partial**: small increase
-- **contradicts + discriminating**: meaningful decrease in confidence
-- **contradicts + partial**: small decrease
-- **unclear or null**: no confidence change, but note what happened in evidence column
+### BeliefState — update existing
+If the BeliefState table lacks a Parent column, treat all beliefs as root and add the column on the next
+compression. An older `Literature` column may be preserved for history, but it never blocks experimental work and
+new beliefs do not require a literature status.
+
+Read the report's conclusion and evidence strength. A clear, adequately replicated support result increases
+confidence; a clear contradiction decreases it; a weak or unresolved result normally leaves confidence unchanged
+while recording what was measured. Scope the belief wording to what the experiment actually tested.
 
 Update status:
 - Confidence ≥ 0.8 → `supported`
@@ -624,39 +617,21 @@ Update status:
 
 Use your judgment on magnitude. The point is directional accuracy, not false precision.
 
-For a completed literature-review run:
-
-- Verify it followed `templates/LITERATURE.template.md` and contains a reproducible search protocol, primary-
-  evidence map, contrary evidence, novelty/gap analysis, implementation guidance, and direction recommendation.
-- If adequate, set Literature to `grounded (R###, YYYY-MM-DD)` for that exact belief. If inadequate or search was
-  blocked, keep `pending`/`refresh-needed` and add a corrective literature-review delta.
-- Literature is evidence and may update confidence, but label it `[literature R###]` in Key evidence so it is not
-  confused with project-generated evidence. Calibrate the update to directness, methodological quality,
-  independence, and match to the exact claim.
-- Verify the versioned literature archive is complete and `REVIEW.md` is byte-identical to the run report; update
-  `LITERATURE/INDEX.md`. Missing or divergent archive files keep the literature gate closed.
-- Apply the review's direction recommendation to the Frontier. A `drop` recommendation does not automatically
-  reject a belief; use the evidence and standard confidence rules. A material reframe creates a new pending belief.
-
 ### BeliefState — add new beliefs
 
-**This is critical for keeping the loop alive.** After updating existing beliefs, ask:
-
-1. **Did the worker report new hypotheses?** Check the "New hypotheses" section of the report. Add any well-reasoned ones as new beliefs at confidence 0.5 and Literature `pending`.
-2. **Did a resolved belief open new questions?** When a belief reaches supported/rejected, the answer often raises deeper questions. Example: belief "A outperforms B" reaches 0.85 → add new belief "A outperforms B because of factor X" at 0.5 and Literature `pending`.
-3. **Did something unexpected show up?** Anomalies, confounds, or surprising observations in the report may suggest hypotheses nobody considered at init time.
-
-The belief space should grow as you learn, not just shrink. If all beliefs are resolved and no new ones are emerging, the research question may be answered — or the agent is not looking deep enough.
+Do not grow the belief space merely to keep the loop alive. Add at most one new belief only when the completed
+experiment directly reveals it and it is necessary for an unresolved part of the human's stated goal. A resolved belief
+does not automatically authorize a mechanism study, broader benchmark, or deeper question. When the target
+hypothesis is supported or rejected with the minimum complete evidence and no explicitly requested goal remains, preserve any
+optional follow-up as a note and trigger `GOAL` after publishing the completed run.
 
 ### Frontier
-- Remove the completed delta
-- **Add literature-review deltas for new beliefs first** — every new belief gets one dedicated review round, ranked
-  ahead of empirical deltas targeting it
-- Add empirical deltas targeting new beliefs only as blocked entries until their Literature status is grounded
-- Review the report's "Next tests" — add any that would discriminate on uncertain beliefs
-- Re-rank: assess Uncertainty, Info gain, Feasibility for each delta. Prioritize high-uncertainty targets with high info-gain.
-- Never select an empirical entry whose target belief is `pending` or `refresh-needed`, even if its rank is highest
-- If Frontier lacks scoring dimension columns, add them on next compression.
+- Remove the completed experiment question
+- Add at most one next experiment only when the current result cannot decide or another explicit human-goal belief
+  remains unresolved
+- For each entry record the question, decision result, minimum complete evidence, ETA, and blocker
+- Re-rank by explicit human-goal relevance, ability to answer, then shortest total ETA.
+- Do not create a scoring audit or retain slower duplicates of a faster decision-capable test.
 - For beliefs that have accumulated multiple null results: consider whether the belief is testable, or needs reformulation
 
 ### Paradigm shift detection
@@ -665,19 +640,24 @@ After updating beliefs and before updating Frontier, check for cascading impact:
 
 1. **Trigger**: A belief is rejected (confidence ≤ 0.2) OR confidence drops ≥ 0.3 in a single update.
 
-2. **Cascade**: Find all beliefs whose Parent references the affected belief. Set status to `needs-review`. Cascade recursively — if a child is itself a parent, flag its children too. Do NOT change children's confidence — that requires re-evaluation.
+2. **Cascade**: Find all beliefs whose Parent references the affected belief. Set status to `needs-retest`. Cascade recursively — if a child is itself a parent, flag its children too. Do NOT change children's confidence — that requires new evidence.
 
 3. **Severity**:
    - **Minor** (no cascade): confidence adjustment, no children affected. No paradigm bump.
    - **Major** (cascade triggered): increment `paradigm` in Meta (v1 → v2). Add to Scratch: `--- Paradigm v2 (date) --- Belief #N rejected. Children #X, #Y flagged. Reason: <summary>.`
 
-4. **On major update**: For each `needs-review` child, add a frontier entry to re-evaluate it. The delta should test whether the child still holds given the parent's new status.
+4. **On major update**: Keep children flagged, but add at most one Frontier experiment: the fastest adequate retest
+   needed for an unresolved explicit human goal. Do not create a retest backlog for every dependent belief.
 
-5. **Resolution**: `needs-review` → `active` (with updated confidence) once a run explicitly re-evaluates it. If no new evidence, supervisor may adjust confidence down 0.1-0.2 noting "indirect adjustment" in evidence.
+5. **Resolution**: `needs-retest` → `active` only after a completed experiment explicitly re-evaluates it. Do not clear the
+   status through an audit or confidence adjustment without new evidence.
 
 ### Meta
 - Increment `total_runs`
 - Update `last_updated`
+- Update `last_experimental_evidence` after each completed run. Reset
+  `direction_recovery_used_since_experiment: false` so one future recovery can become eligible only after direction is
+  exhausted again.
 - Phase 6b then commits and pushes this compressed state with the complete run scope
 
 ---
@@ -686,22 +666,27 @@ After updating beliefs and before updating Frontier, check for cascading impact:
 
 | Boundary | Condition | Action |
 |----------|-----------|--------|
+| `GOAL` | The human's target hypothesis has adequate supporting or contradicting evidence in the stated scope, and no explicitly requested question remains | Stop after Phase 6b. Return the result, adequacy, scope, and any verdict-changing caveat. Do not manufacture follow-up work. |
 | `BUDGET` | Cumulative time exceeds policy max | Stop. Report what was learned. |
-| `NULL_STREAK` | N consecutive null-signal runs | Stop. The current approach isn't producing discrimination. Suggest new direction. |
-| `BLOCKER` | Worker returns BLOCKER, or Phase 6b cannot safely commit/push after recovery attempts | Stop. Present details; for Git failures include branch, local commit if any, remote, and exact error. Never force-push. |
+| `NULL_STREAK` | N consecutive completed experiments cannot decide | Stop. The current approach is not answering the question. Suggest one new direction. |
+| `STALL` | No decision-capable experiment can be specified | Stop before spending more compute. Explain what is missing. |
+| `BLOCKER` | The selected experiment cannot proceed after bounded repair, or Phase 6b cannot safely commit/push | Keep the run ID pending. Do not create a research report or Ledger row. Present the exact error and missing prerequisite; never force-push. |
 | `AMBIGUITY` | Frontier empty AND can't regenerate | Stop. Ask human for new hypotheses. |
 | `IRREVERSIBLE` | Next delta requires irreversible action | Pause. Get human approval. |
 
 When any interrupt triggers:
 1. Note it in Scratch section of STATE.md
-2. Tell the human: what happened, what was learned, what's next
+2. Tell the human in plain English, normally within 150 words: answer/blocker first; up to three concrete evidence
+   bullets; the tested scope or exact error; and one next action only when input is required. Translate the boundary
+   name instead of making the human decode loop jargon.
 3. Wait for human input before resuming
 
 ---
 
-## 7. wandb Report Generation
+## 7. Optional wandb Report Generation
 
-On significant events (paradigm shift, belief resolved, every 5 runs), spawn a sub-agent to create a versioned wandb Report snapshot. Skip if wandb mode is `disabled`.
+Generate a versioned wandb Report only when the human explicitly requested it or active project policy requires it.
+Do not trigger a report merely because a belief resolved or five runs elapsed. Skip if wandb mode is `disabled`.
 
 The sub-agent reads `templates/WANDB_REPORTS.md` for the full spec. The supervisor passes: version number, project name, and latest run ID.
 

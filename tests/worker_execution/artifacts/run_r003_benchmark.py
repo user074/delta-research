@@ -188,7 +188,7 @@ def format_ratio(dup_ratio):
     return f"{int(dup_ratio * 100)}%"
 
 
-def build_report(results, speedups, comparisons, plot1, plot2, total_runtime):
+def build_report(results, speedups, comparisons, plot1, total_runtime):
     rows = []
     for size in SIZES:
         for dup_ratio in DUP_RATIOS:
@@ -207,17 +207,14 @@ def build_report(results, speedups, comparisons, plot1, plot2, total_runtime):
 
     speedup_1m = speedups[1_000_000][0.95]
     if speedup_1m > 1.2:
-        verdict = "unclear"
-        signal = "discriminating"
-        interpretation = "The 95% duplicate case produced a meaningful speedup above the 1.2x support threshold, but the causal attribution remains confounded."
+        verdict = "supports"
+        interpretation = "The 95% duplicate case exceeded the 1.2x support threshold."
     elif all(val < 1.05 for size in SIZES for val in speedups[size].values()):
         verdict = "contradicts"
-        signal = "discriminating"
         interpretation = "All observed speedups stayed below 1.05x, which would contradict the belief."
     else:
-        verdict = "unclear"
-        signal = "partial"
-        interpretation = "Duplicate-heavy inputs were faster, but not by enough to isolate equal-element optimization as the main cause."
+        verdict = "cannot decide"
+        interpretation = "The measured effect fell between the support and contradiction thresholds."
 
     best = max(
         ((size, dup_ratio, speedups[size][dup_ratio]) for size in SIZES for dup_ratio in DUP_RATIOS[1:]),
@@ -225,26 +222,47 @@ def build_report(results, speedups, comparisons, plot1, plot2, total_runtime):
     )
 
     lines = [
-        "# Worker Report — R003",
+        "# REPORT — R003: Do duplicate-heavy inputs reduce Python sorting time?",
         "",
-        "Duplicate-heavy arrays sorted faster than fully random arrays at every tested size. The strongest effect was at 5,000,000 elements with 95% duplicates, where `sorted(array.tolist())` was about "
-        f"{speedups[5_000_000][0.95]:.2f}x faster than the baseline; at the plan's key checkpoint of 1,000,000 elements and 95% duplicates, the speedup was {speedup_1m:.2f}x.",
+        "## Answer",
         "",
-        "The confound check does not support a `sorted()`-specific trick. `list.sort()` showed the same directional effect and often even larger speedups, which suggests the gains mostly come from cheaper comparisons and repeated-key structure rather than from a wrapper-only optimization.",
+        f"The result {verdict} hypothesis #3: at 1,000,000 elements, 95% duplicates made sorting {speedup_1m:.2f}x faster than the 0% baseline. The same direction appeared across sizes, but this run does not identify the internal Timsort mechanism.",
         "",
-        f"Total runtime was {total_runtime:.2f} seconds. No stop condition triggered: no individual benchmark exceeded 5 minutes, and all max/min variance ratios stayed below 5x.",
+        "## Motivation",
         "",
-        "## Benchmark Results",
+        "Belief #3 predicts that duplicate-heavy inputs reduce Python sorting time. The support threshold was 1.2x speedup at 1M/95%; below 1.05x across conditions would contradict it.",
+        "",
+        "## Questions tested",
+        "",
+        "1. **Primary:** Does increasing duplicate ratio materially reduce `sorted()` time?",
+        "2. **Secondary:** Does `list.sort()` show the same direction?",
+        "",
+        "## Method",
+        "",
+        "- **approach:** Vary duplicate ratio and size while holding generation and timing fixed.",
+        f"- **data:** Seed-{SEED} synthetic floats at five sizes and four duplicate ratios.",
+        "- **comparisons:** Each duplicate-heavy arm versus its same-size 0% baseline; `list.sort()` control.",
+        "- **metrics:** Median runtime, max/min spread, and speedup.",
+        f"- **repetitions:** {REPETITIONS} per condition.",
+        "- **environment:** Current Python/NumPy CPU environment recorded with the artifacts.",
+        "- **scientific changes during execution:** None.",
+        "",
+        "## Experiments",
+        "",
+        "| Experiment | Why it is needed | Comparison / conditions |",
+        "| --- | --- | --- |",
+        "| Main grid | Answers the primary question | 5 sizes x 4 duplicate ratios |",
+        "| `list.sort()` control | Checks wrapper-specific behavior | Same sizes at 0% and 95% |",
+        "",
+        "## Results",
         "",
         "| Size | Duplicate ratio | Median `sorted(array.tolist())` (s) | Min (s) | Max (s) | Max/Min | Speedup vs 0% |",
         "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
         *rows,
         "",
-        "## Visualizations",
+        "### Visualization",
         "",
         f"![Median sort time vs array size]({plot1.as_posix()})",
-        "",
-        f"![Speedup vs duplicate ratio]({plot2.as_posix()})",
         "",
         "## Confound Check: `sorted()` vs `list.sort()` at 95% duplicates",
         "",
@@ -252,21 +270,34 @@ def build_report(results, speedups, comparisons, plot1, plot2, total_runtime):
         "| --- | ---: | ---: | ---: | ---: |",
         *confound_rows,
         "",
-        "## Interpretation",
+        "## Analysis",
         "",
         f"The best observed speedup was {best[2]:.2f}x at size {best[0]:,} with {format_ratio(best[1])} duplicates. The effect is strong and consistent, but this benchmark alone does not identify the mechanism behind it.",
         "",
-        f"For the belief under test, the evidence is {interpretation.lower()} The duplicate effect is real, but the parallel behavior in `sorted()` and `list.sort()` means the data support the speedup claim more than the equal-element-optimization explanation.",
+        f"{interpretation} `list.sort()` moved in the same direction, so the effect is not unique to the `sorted()` wrapper. The design supports the empirical speedup claim but does not isolate its cause.",
         "",
-        "## Structured Summary",
+        "## Limitations and tested scope",
         "",
-        f"- Signal: {signal}",
-        f"- Verdict: {verdict} (speedup supported, mechanism unclear)",
-        "- Target belief: #3 — Duplicate-heavy distributions reduce sorting time due to equal-element optimizations",
-        f"- Key metric: 1,000,000 elements at 95% duplicates -> {speedup_1m:.2f}x speedup vs baseline",
-        "- Confounds: duplicate-heavy inputs change both comparison patterns and value distribution, so this benchmark cannot cleanly separate algorithmic equal-element handling from broader repeated-key effects",
-        "- New hypotheses: repeated keys help primarily by collapsing comparison work; any Timsort-specific equal-element optimization, if it exists, is a secondary effect",
-        "- Next tests: instrument comparison counts with custom comparable objects; compare CPython versions or alternative sort implementations on the same repeated-key workload",
+        "The result covers synthetic floats with one repeated value in this runtime. It does not directly measure comparison counts or Timsort internals.",
+        "",
+        "## Conclusion",
+        "",
+        f"- **answer:** {verdict} hypothesis/belief #3.",
+        f"- **decisive evidence:** 1M/95% produced {speedup_1m:.2f}x speedup; the best condition produced {best[2]:.2f}x.",
+        "- **confidence:** Supervisor assigns the scoped update from the predeclared thresholds.",
+        "- **next experiment:** None if the empirical hypothesis is decided; otherwise repeat the same question with a tighter measurement.",
+        "",
+        "## Reproducibility",
+        "",
+        "- **command:** `python tests/worker_execution/artifacts/run_r003_benchmark.py`",
+        "- **metrics:** Inline table above.",
+        f"- **artifacts:** `{plot1.as_posix()}`",
+        "",
+        "## Meta",
+        "",
+        "- **run_id:** R003",
+        f"- **completed runtime:** {total_runtime:.2f} seconds",
+        "- **execution:** direct",
         "",
     ]
     return "\n".join(lines)
@@ -281,8 +312,6 @@ def main():
     comparisons = benchmark_sort_methods(arrays)
 
     plot1 = ARTIFACTS / "median_sort_time_vs_size.svg"
-    plot2 = ARTIFACTS / "speedup_vs_duplicate_ratio.svg"
-
     series1 = []
     for dup_ratio in DUP_RATIOS:
         ys = [results[(size, dup_ratio)]["median"] for size in SIZES]
@@ -298,24 +327,8 @@ def main():
         log_y=True,
     )
 
-    x_dup = [50, 80, 95]
-    series2 = []
-    for size in SIZES:
-        ys = [speedups[size][0.5], speedups[size][0.8], speedups[size][0.95]]
-        series2.append((f"{size:,}", ys, None))
-    write_svg_line_chart(
-        plot2,
-        "Speedup vs duplicate ratio",
-        x_dup,
-        series2,
-        "Duplicate ratio (%)",
-        "Speedup vs 0% duplicates",
-        log_x=False,
-        log_y=False,
-    )
-
     total_runtime = time.perf_counter() - start_time
-    report = build_report(results, speedups, comparisons, plot1.relative_to(ROOT), plot2.relative_to(ROOT), total_runtime)
+    report = build_report(results, speedups, comparisons, plot1.relative_to(ROOT), total_runtime)
     REPORT.write_text(report)
 
 

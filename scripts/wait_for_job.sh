@@ -4,9 +4,9 @@
 # Usage: scripts/wait_for_job.sh <SLURM_JOB_ID> <OUTPUT_FILE> [TIMEOUT_SECONDS]
 #
 # Exit codes:
-#   0 — DELTA-DONE received (job completed successfully)
+#   0 — DELTA-SMOKE-DONE or DELTA-DONE received (stage completed successfully)
 #   1 — DELTA-BLOCKER received (unrecoverable failure)
-#   2 — Job vanished from squeue without DELTA-DONE
+#   2 — Job vanished from squeue without a success marker
 #   3 — Timeout reached
 #
 # Note: DELTA-ERROR is recoverable — printed but does not terminate monitoring.
@@ -37,7 +37,10 @@ TAIL_PID=""
 FIFO=""
 
 cleanup() {
-    [[ -n "$TAIL_PID" ]] && kill "$TAIL_PID" 2>/dev/null || true
+    if [[ -n "$TAIL_PID" ]]; then
+        kill "$TAIL_PID" 2>/dev/null || true
+        wait "$TAIL_PID" 2>/dev/null || true
+    fi
     [[ -n "$FIFO" && -p "$FIFO" ]] && rm -f "$FIFO"
 }
 trap cleanup EXIT
@@ -89,7 +92,10 @@ while true; do
         if [[ "$LINE" == *"[DELTA-"* ]]; then
             echo "$LINE"
 
-            if [[ "$LINE" == *"[DELTA-DONE]"* ]]; then
+            if [[ "$LINE" == *"[DELTA-SMOKE-DONE]"* ]]; then
+                FINAL_STATUS="SMOKE_DONE"
+                break
+            elif [[ "$LINE" == *"[DELTA-DONE]"* ]]; then
                 FINAL_STATUS="DONE"
                 break
             elif [[ "$LINE" == *"[DELTA-BLOCKER]"* ]]; then
@@ -113,10 +119,12 @@ while true; do
             sleep 2  # Let buffered output flush
 
             # Scan the full output file for terminal markers
-            if grep -q '\[DELTA-DONE\]' "$OUTPUT_FILE" 2>/dev/null; then
-                FINAL_STATUS="DONE"
-            elif grep -q '\[DELTA-BLOCKER\]' "$OUTPUT_FILE" 2>/dev/null; then
+            if grep -q '\[DELTA-BLOCKER\]' "$OUTPUT_FILE" 2>/dev/null; then
                 FINAL_STATUS="BLOCKER"
+            elif grep -q '\[DELTA-SMOKE-DONE\]' "$OUTPUT_FILE" 2>/dev/null; then
+                FINAL_STATUS="SMOKE_DONE"
+            elif grep -q '\[DELTA-DONE\]' "$OUTPUT_FILE" 2>/dev/null; then
+                FINAL_STATUS="DONE"
             else
                 FINAL_STATUS="VANISHED"
             fi
@@ -134,6 +142,10 @@ exec 3<&-
 # Phase 3: Report result
 # ---------------------------------------------------------------------------
 case "${FINAL_STATUS:-UNKNOWN}" in
+    SMOKE_DONE)
+        echo "[WAIT] Job ${JOB_ID} finished | status=SMOKE_DONE"
+        exit 0
+        ;;
     DONE)
         echo "[WAIT] Job ${JOB_ID} finished | status=DONE"
         exit 0
@@ -143,7 +155,7 @@ case "${FINAL_STATUS:-UNKNOWN}" in
         exit 1
         ;;
     VANISHED)
-        echo "[WAIT] Job ${JOB_ID} finished | status=VANISHED (job left squeue without DELTA-DONE)"
+        echo "[WAIT] Job ${JOB_ID} finished | status=VANISHED (job left squeue without a success marker)"
         exit 2
         ;;
     TIMEOUT)

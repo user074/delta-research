@@ -1,4 +1,13 @@
-# LITERATURE REVIEW — (run ID)
+# OPTIONAL DIRECTION-RECOVERY LITERATURE BRIEF — (brief ID)
+
+> Autonomous use is allowed only after a direct experiment fails scientifically, the Frontier is empty,
+> regeneration from project evidence finds no direction, and `direction_recovery_used_since_experiment` is false. A
+> human may also explicitly request a brief. This is not an R### research run, does not block experiments, does not
+> enter the Ledger, and must never displace an executable direct experiment.
+>
+> Recovery mode is capped at 30 minutes and 8 relevant primary/official sources. State one exact direction question
+> before searching. Stop earlier after finding 3 executable direct candidates. If none is found, trigger AMBIGUITY;
+> never launch another literature search. Literature cannot update belief confidence or count as evidence.
 
 ## Summary
 
@@ -11,10 +20,12 @@ work already exists, and the recommended direction.)
 - **exact hypothesis**: (copy the exact BeliefState wording; do not broaden it)
 - **pre-review confidence**: (0–1)
 - **why this review is needed**: (decision or experiment it should ground)
+- **eligibility evidence**: (failed/null/unclear direct run + why STATE/reports/artifacts yielded no next direction)
+- **direction question**: (one exact question expected to yield a hypothesis, intervention, baseline, or outcome)
 
-## Plan amendments
+## Material changes
 
-<!-- Compare PLAN.initial.md with the final PLAN.md. State "None" if unchanged. -->
+<!-- State "None" unless the exact direction question changed after search results were visible. -->
 | Version | Class | When | What changed | Why scope was preserved | Evidence seen first? |
 |---------|-------|------|--------------|-------------------------|----------------------|
 | (vN) | (A/B) | (timestamp) | (before → after) | (target/search/evidence standard retained) | (no, or exact evidence already seen) |
@@ -32,6 +43,7 @@ work already exists, and the recommended direction.)
 - **inclusion criteria**: (scope, source types, dates, languages, populations/models/tasks)
 - **exclusion criteria**: (what was excluded and why)
 - **coverage limits**: (paywalls, inaccessible papers, terminology uncertainty, sparse subfield, etc.)
+- **recovery cap**: (30 minutes; ≤8 relevant primary/official sources; stop after 3 executable candidates)
 
 ## Evidence map
 
@@ -72,26 +84,23 @@ them. Do not claim novelty merely because terminology differs.)
 (Concrete improvements to construct, intervention, task, controls, outcomes, baselines, or analysis. Explain which
 original directions should be avoided and why.)
 
-## Grounding verdict
+## Direction verdict
 
-- **literature status**: grounded | insufficient-review | BLOCKER
 - **evidence verdict**: supports | contradicts | mixed | unresolved | misframed
 - **recommended action**: keep | narrow | reframe | deprioritize | drop
-- **confidence update recommendation**: (old → proposed, with calibration rationale; supervisor decides)
-- **empirical gate**: open | closed
-- **first empirical test**: (best grounded next delta, or why none should run)
+- **belief confidence update**: none — literature is directional input, not project evidence
+- **first empirical test**: (best direct experiment; the brief does not gate it)
 - **decisive rationale**: (short explanation tying the evidence to the recommendation)
 
 ## New hypotheses
 
-<!-- Any new hypothesis becomes literature=pending and requires its own future review run. -->
 - (new hypothesis, with reasoning) [parent: #N or —]
 
 ## Next tests
 
 1. (best empirically discriminating delta after applying the review)
 2. (alternative if the primary direction is infeasible)
-3. (targeted follow-up literature review for a genuinely new hypothesis, if warranted)
+3. (wild card experiment suggested by the evidence)
 
 ## Sources
 
@@ -102,17 +111,19 @@ original directions should be avoided and why.)
 
 ## Artifacts
 
-- `LITERATURE/B###/R###/REVIEW.md` — canonical full review; byte-identical to this run report
-- `LITERATURE/B###/R###/queries.md` — exact query/search log and screening notes
-- `LITERATURE/B###/R###/evidence.csv` — machine-readable source/evidence matrix
-- `LITERATURE/B###/R###/sources.bib` — BibTeX for included sources when available; otherwise a complete linked
+- `LITERATURE/B###/L###/REVIEW.md` — canonical full brief
+- `LITERATURE/B###/L###/queries.md` — exact query/search log and screening notes
+- `LITERATURE/B###/L###/evidence.csv` — machine-readable source/evidence matrix
+- `LITERATURE/B###/L###/sources.bib` — BibTeX for included sources when available; otherwise a complete linked
   source list at this path
-- `RUNS/R###/artifacts/(file)` — (optional plots or auxiliary extraction artifacts)
+- `LITERATURE/B###/L###/artifacts/(file)` — (optional plots or auxiliary extraction artifacts)
 
 ## Meta
 
-- **run_id**: (R###)
-- **type**: literature-review
+- **brief_id**: (L###)
+- **type**: optional-literature-brief
+- **trigger**: human-requested | one-shot-direction-recovery
+- **recovery_after_run**: (R### or N/A for human-requested)
 - **target_belief**: #N
 - **started**: (timestamp)
 - **completed**: (timestamp)

@@ -27,9 +27,10 @@ Let the human confirm, correct, or add what's missing. Ask about what they've tr
 
 **Round 2 — Hypotheses** (dig deeper based on round 1):
 Ask the human to list their hypotheses one by one. Do not dump all questions at once.
-- What do you think is true but haven't proven? (these become seed beliefs with Literature `pending`)
+- What do you think is true but haven't proven? (these become seed beliefs)
 - What are the competing explanations? (these shape the frontier)
 - What would change your mind? (this defines what "discriminating" means)
+- What is the smallest experiment that could produce that evidence? (this becomes the first direct frontier entry)
 
 **Round 3 — Reference repos**:
 Before assuming the agent should build from scratch, ask:
@@ -43,6 +44,8 @@ Record these as paths or URLs in STATE.md Environment → "Reference repos". Whe
 Ask the human to list their constraints one by one. Do not dump all questions at once.
 - What does success look like? When would you stop?
 - Any constraints — time budget, compute limits, things not to touch?
+- If GPUs are available, how many GPUs may each experiment use? Record the exact confirmed count; do not infer it
+  from the number detected.
 - Any irreversible actions to watch for?
 
 Adapt the interview based on what the human says. If they mention something interesting, follow up. The goal is to extract their mental model of the problem — not just fill in template fields.
@@ -75,8 +78,13 @@ The file should contain:
 - **Research loop** section:
   - Research question and goals (from interview)
   - Key constraints (from interview)
-  - Mandatory literature gate: every seed or future hypothesis receives its own literature-review run before an
-    empirical run may target it
+  - One run, one coherent answer: an R### contains the baseline, treatment, required repetitions, essential
+    controls, and verdict-changing ablations for one hypothesis question. Setup and partial conditions are not runs.
+  - Scientific literature search is one-shot direction recovery only after direct work fails and STATE/reports
+    cannot yield another experiment; never while an executable direction exists
+  - Once the human confirms `N` GPUs, every experiment job allocates and gives useful work to all `N`; optimize
+    shortest wall-clock time, prefer DDP whenever one replica fits, and use tensor/model parallelism only when a
+    replica cannot fit or the operation cannot be divided across independent samples
   - How to run: `To continue research, say: "run the research loop"`
 
 - **Reference: where to find what** (lookup table — agents should consult this when they need a spec, not guess):
@@ -90,10 +98,11 @@ The file should contain:
   | `delta-research/templates/WANDB_REPORTS.md` | wandb Report sub-agent spec — triggers, what to read, what to produce, plot quality rules | When a Report trigger fires (paradigm shift, belief resolved, every 5 runs) |
   | `delta-research/templates/INIT.md` | First-time initialization (interview, env setup, INFRA.md, SLURM test job) | Only when re-initializing — env change, new cluster, etc. |
   | `delta-research/templates/STATE.template.md` | Structure of STATE.md | When seeding STATE.md from scratch |
-  | `delta-research/templates/PLAN.template.md` | Structure of PLAN.md (Delta, Resources, SLURM, Commands, Predictions, Success metrics, Stop conditions, Context, Meta) | When writing a plan in Phase 3 |
-  | `delta-research/templates/REPORT.template.md` | Structure of REPORT.md (Summary, Method, Results with predicted-vs-actual, Signal, Verdict, Confounds, New hypotheses, Next tests, Meta) | When the worker is writing a report |
-  | `delta-research/templates/LITERATURE.template.md` | Dedicated one-hypothesis literature-review report: reproducible search protocol, evidence map, contrary work, novelty, reusable assets, and direction recommendation | When a belief is `pending` or `refresh-needed`; must precede empirical testing |
-  | `delta-research/templates/LITERATURE_INDEX.template.md` | Durable registry linking beliefs to their latest versioned review archive and run report | When initializing literature storage or ingesting a review |
+  | `delta-research/templates/PLAN.template.md` | Minimal editable PLAN.md (question, complete evidence package, method/resources, prediction, bounds) | Spend ≤5 minutes normally/≤10 minutes hard, then execute |
+  | `delta-research/templates/REPORT.template.md` | Compact paper-like REPORT.md (Answer, Motivation, Questions, Method, Experiments, Results, Analysis, optional Ablations, Limitations, Conclusion, Reproducibility) | When the worker is writing a report |
+  | `delta-research/templates/BLOCKER.template.md` | Short pending-experiment note; not a report, Ledger row, completed run, or new ID | When bounded repair cannot reach the experiment |
+  | `delta-research/templates/LITERATURE.template.md` | Optional bounded direction-recovery or human-requested brief; not a loop run, belief update, or experiment gate | After eligible one-shot direction failure, or when the human explicitly requests a brief |
+  | `delta-research/templates/LITERATURE_INDEX.template.md` | Optional registry for bounded recovery/human-requested briefs | Only when maintaining optional literature artifacts |
   | `delta-research/templates/INFRA.template.md` | Structure of INFRA.md (compute, optimization playbook, storage, cluster, job execution) | When (re)building INFRA.md |
   | `delta-research/scripts/wait_for_job.sh` | Blocking SLURM monitor — tails output for DELTA markers, exits on DONE/BLOCKER, has FIFO read + 30s safety net | Use it directly via `bash scripts/wait_for_job.sh <JOB_ID> <OUTPUT_FILE>`. Never reimplement. |
 
@@ -104,10 +113,8 @@ The file should contain:
   | `STATE.md` | Current beliefs, ledger, frontier, environment. **Read first in any research conversation.** | Supervisor (read+write). Workers never touch. |
   | `INFRA.md` | Hardware profile, optimization playbook, storage paths, cluster config, validated env activation | Init agent (write); supervisor + workers (read) |
   | `SYNTHESIS.md` | Human-facing narrative — what we've learned and where we are | Supervisor (write at paradigm shift / belief resolution) |
-  | `REPORTS/R###.md` | Per-run experimental or literature-review reports — full evidence, analysis, and verdict | Worker (write); supervisor (read in Phase 5) |
-  | `LITERATURE/INDEX.md` | Per-belief grounding status, latest verdict/direction, and archive links | Supervisor (write during review-run compression) |
-  | `LITERATURE/B###/R###/` | Immutable review, query log, evidence matrix, and bibliography for one review version | Literature worker (write); supervisor validates |
-  | `RUNS/R###/` | Per-run dir: immutable `PLAN.initial.md`, amendable/versioned `PLAN.md`, execution files, logs, metrics, checkpoints, artifacts, and scripts | Supervisor creates both plans; worker may make logged Class A repairs to live PLAN.md |
+  | `REPORTS/R###.md` | One compact paper-like report per completed, decision-capable experiment | Worker (write); supervisor (read in Phase 5) |
+  | `RUNS/R###/` | Per-run dir: one editable `PLAN.md`, execution files, logs, metrics, checkpoints, artifacts, and scripts | Supervisor creates a short working guide; worker edits it freely while executing |
 
   *When in doubt:*
   - Lost context after compaction? → re-read `STATE.md` (current state) + this CLAUDE.md/AGENTS.md (rules). For phase details, re-read `SUPERVISOR.md`.
@@ -118,33 +125,58 @@ The file should contain:
 
   **The 7 phases** (one cycle):
   1. Read STATE.md (beliefs, ledger, frontier)
-  2. Enforce the Literature Grounding Gate, then select the highest-ranked eligible delta from Frontier
-  3. Write the live plan to `RUNS/R###/PLAN.md`, then preserve its exact initial bytes as
-     `RUNS/R###/PLAN.initial.md` before spawning the worker
+  2. Select one hypothesis question and the shortest complete experiment capable of answering it
+  3. Spend at most 5 minutes normally (10 minutes hard cap) writing one concise, editable
+     `RUNS/R###/PLAN.md`, then start the worker
   4. Spawn a worker with the plan
   5. Ingest the worker's REPORT.md
   6. Compress STATE.md (update beliefs, append ledger, refresh frontier, update SYNTHESIS.md if a paradigm shifted)
   7. Loop back to phase 1
 
   **Hard contracts** (do not break these):
-  - Workers NEVER modify STATE.md or `PLAN.initial.md`
-  - Live `PLAN.md` supports controlled amendments: workers fix and log trivial Class A execution bugs; Class B
-    scope-preserving changes need supervisor approval; Class C scientific redesign gets a new run
-  - Never revise hypotheses, primary endpoints/thresholds, or predictions in response to observed outcomes
-  - Workers suggest new directions ONLY via the report's "New hypotheses" and "Next tests" sections
-  - Workers use the resource identities specified in the live plan. A stale identity-equivalent path/API is a
-    logged Class A repair; a scope-preserving substitution requires `AMENDMENT_NEEDED`; a scientifically different
-    resource is Class C and requires a new run. Use BLOCKER only after the applicable repair path is exhausted.
-  - Every belief starts with Literature `pending`; its dedicated literature-review run must complete before any
-    empirical, analysis, exploration, or engineering delta may target it
-  - Every future hypothesis added during compression also starts `pending` and immediately receives a literature-
-    review frontier entry
-  - A materially reframed hypothesis becomes `refresh-needed` and must be reviewed again
+  - Workers NEVER modify STATE.md
+  - `PLAN.md` is a working guide, not an immutable contract. Do not create `PLAN.initial.md`, versions, amendment
+    classes, or approval gates. Workers edit commands, paths, resources, compute, and analyses directly.
+  - Planning is normally ≤5 minutes, always ≤10 minutes, and under 400 prose words. Start when the question,
+    complete evidence package, first command, required resources, and bounds are clear.
+  - The hardware objective is shortest wall-clock time to the complete answer. Once the human confirms `N` GPUs,
+    allocate all `N` and assign useful samples, batches, or independent conditions to each; never leave confirmed GPUs idle.
+  - When one model replica fits on one GPU, use DDP across the confirmed GPUs. Tensor/model parallelism is allowed
+    only for a concrete single-GPU memory or indivisible-operation constraint, which must be stated in the plan/report.
+  - Human-facing communication follows the Feynman test: answer in the first sentence, then exact evidence, plain
+    English meaning, tested scope, and only the limitation that could change the answer. Keep summaries ≤80 words.
+    Use real technical names and numbers, but define unfamiliar terms and never invent jargon or acronyms.
+  - Keep `delta`, `frontier`, `evidence floor`, `paradigm`, `unblocker`, and `belief movement` inside STATE/Meta.
+    Translate them for the human. Do not narrate audits, workflow, or steps that do not affect the answer.
+  - Never erase observed outcomes or portray an outcome-driven scientific change as decided earlier. Record one
+    short Working note only for a material scientific change; mechanical fixes require no audit trail.
+  - Workers do not suggest new research directions. A report names at most one next experiment only when the same
+    primary question remains unresolved.
+  - Workers may repair or substitute resources directly. Note it only when the substitution materially changes
+    interpretation. Use BLOCKER only after practical repair is exhausted or an actual interrupt boundary fires.
+  - One R### is one coherent answer, not one command. Keep baseline, treatment, repetitions, necessary controls,
+    verdict-changing ablations, setup, retries, and analysis in the same run.
+  - A run is complete only when it has the minimum evidence needed to support, contradict, or honestly fail to
+    decide the named hypothesis. Substantial means decision-complete, not artificially large.
+  - Run the highest-signal condition first, but do not close after a trivial subset. Stop after the complete package
+    answers the claim; add no work merely to make a sufficient result look stronger.
+  - When the human's target hypothesis is adequately supported or contradicted, trigger `GOAL` after Phase 6b.
+    Do not invent mechanism studies, broader benchmarks, or new beliefs to keep the loop alive.
+  - Literature review, experiment surveys, audits, gates, cleanup, and refactors are not standalone research runs
+  - Setup, conversion, technical lookup, smoke checks, debugging, retries, seeds, conditions, metrics, controls,
+    ablations, plots, and analysis never receive separate run IDs.
+  - If bounded repair cannot reach decision-capable evidence, write `RUNS/R###/BLOCKER.md`; do not write a research
+    report, append the Ledger, increment `total_runs`, or consume another ID.
+  - On resume, a `RUNS/R###/BLOCKER.md` whose ID is absent from the Ledger is pending work. Retry the same PLAN/ID
+    after the prerequisite is resolved; never allocate a fresh ID to step around it.
+  - A bounded literature direction recovery is allowed at most once between completed experiments, only after a
+    scientific failure and an empty regenerated Frontier. It must yield an experiment or trigger AMBIGUITY.
 
   **A run is atomic — phases 3–6b are one unit. The cycle ends after the pushed Phase 6b commit, NOT at Phase 4 or state compression alone.**
-  Once a plan is approved (Phase 2), launch the worker. Don't ask for permission between submit/wait/sync/report. After the worker writes `REPORTS/R###.md`, you (the supervisor) must immediately, in the same turn:
-  1. **Phase 5 — Ingest the report.** Read `REPORTS/R###.md`. Pull out the signal, verdict, numbers, new hypotheses.
-  2. **Phase 6 — Compress STATE.md.** Append the Ledger row. Update belief confidences. Refresh the Frontier. Update SYNTHESIS.md if a belief resolved or paradigm shifted. Spawn the wandb Report sub-agent if a trigger fires (paradigm shift, belief resolution, every 5 runs — see WANDB_REPORTS.md). The wandb sub-agent runs in the background and does NOT block this phase.
+  Once the minimal working guide exists (Phase 3), launch the worker. Don't ask for plan approval or permission between submit/wait/sync/report. After the worker writes `REPORTS/R###.md`, you (the supervisor) must immediately, in the same turn:
+  1. **Phase 5 — Ingest the report.** Read `REPORTS/R###.md`. Pull out the answer, method, experiments, results,
+     analysis, scope, conclusion, and reproducibility details.
+  2. **Phase 6 — Compress STATE.md.** Append the Ledger row. Update belief confidences. Refresh the Frontier. Update SYNTHESIS.md briefly if the target resolved or a paradigm shifted. Generate a wandb Report only when the human or active policy explicitly requested one; it never blocks this phase.
   3. **Phase 6b — Publish.** Curate `.gitignore`, explicitly stage only the run scope, validate, commit on the
      research branch, push, and verify the remote-tracking branch.
   4. Then either continue to Phase 1 of the next cycle, or stop **only** at an interrupt boundary.
@@ -154,29 +186,37 @@ The file should contain:
   branch, pushes, and verifies the remote-tracking branch. The cycle is not complete and the next cycle cannot
   start until this succeeds. Never use blanket `git add` or force-push.
 
-  **"The experiment succeeded" is NOT a stopping condition.** Neither is "the worker wrote the report." A cycle that ends with REPORT.md written but STATE.md unchanged is a half-done cycle — the loop has lost memory of what just happened. The supervisor's job isn't done until STATE.md reflects the new run. The expected shape of every cycle is: *plan → worker executes → worker analyzes + visualizes + writes REPORT.md → supervisor ingests → supervisor updates STATE.md/SYNTHESIS.md → either continue or hit an interrupt boundary*. The only valid stops are the interrupt boundaries below — never mid-cycle.
+  **"The experiment succeeded" is not a mid-cycle stopping condition.** Neither is "the worker wrote the report." A cycle that ends with REPORT.md written but STATE.md unchanged is half done. The expected shape is: *plan → worker executes the minimum decisive test → worker writes the result → supervisor ingests → supervisor updates STATE.md/SYNTHESIS.md → Phase 6b publishes → either `GOAL`, another interrupt, or the next cycle*. Plots and extra analysis are optional. A sufficient support/contradict result triggers `GOAL` only after the completed run is compressed and published.
 
-  **Smoke test before hero run**: For any non-trivial run (training, long benchmarks, anything >30 min), run the plan's `## Smoke Test` first — short walltime, fast-queue partition, 1 GPU, small data slice. Use it to validate paths, VRAM headroom, throughput, and refine the hero walltime estimate. A failed 4-hour run wastes 4 hours of compute *and* queue time. Skip only for runs <10 min, deterministic non-GPU analyses, or a near-identical config that succeeded in the last 24 hours. See OBSERVABILITY.md Step 0 for the procedure.
+  **Smoke tests are optional, not gates**: Use one only when the working plan names a concrete costly-run failure
+  risk that a probe can cheaply resolve. Cap it at 10% of the run budget and continue immediately to the
+  measurement when it passes. Otherwise run the experiment directly. Smoke and measurement share one R###;
+  passing the smoke never completes the run. See OBSERVABILITY.md Step 0.
 
   **SLURM is one unit**: `sbatch` → `bash scripts/wait_for_job.sh ${JOB_ID} {OUTPUT_FILE}` → `wandb sync` (if offline) → write REPORT.md → **Phase 5 (ingest) → Phase 6 (compress STATE.md) → Phase 6b (commit + push + verify)**. No breaks. The moment `wait_for_job.sh` returns, do NOT yield — keep going through Phase 6b in the same turn. Do NOT manually poll `squeue` — `wait_for_job.sh` handles monitoring with FIFO-based reading and a 30s safety net.
 
-  **Failure recovery is part of the run**: If a run hits DELTA-BLOCKER, non-zero exit, or missing output: read logs, diagnose (env issue, OOM, code bug, missing path), fix, re-run. Iterate up to 2-3 times. Only escalate to BLOCKER when the failure is truly unfixable without human input.
+  **Failure recovery is part of the run**: If a run hits DELTA-BLOCKER, non-zero exit, or missing output: read logs,
+  diagnose, fix, and re-run under the same ID. Iterate up to 2-3 times. If truly blocked, write `BLOCKER.md` and
+  pause without a completed report, Ledger row, run-count increment, or new ID.
 
   **Interrupt boundaries** (the ONLY valid reasons to stop the loop):
+  - GOAL — target hypothesis adequately supported or contradicted in the tested scope; no explicit question remains
   - BUDGET — time/compute budget exceeded
-  - NULL_STREAK — N consecutive runs with null discrimination (N from STATE.md Policy)
+  - NULL_STREAK — N consecutive completed experiments that cannot decide
+  - STALL — no decision-capable experiment can be specified
   - BLOCKER — unrecoverable failure
   - AMBIGUITY — beliefs/frontier can't be updated without human input
   - IRREVERSIBLE — about to take an action that can't be undone
 
-  **Autonomous operation**: The loop does NOT stop after a few runs. It cycles until an interrupt boundary triggers. Don't emit user-facing summaries between cycles.
+  **Autonomous operation**: The loop cycles until an interrupt boundary triggers, including `GOAL`; it does not
+  invent follow-up work after the target is decided. Don't emit user-facing summaries between cycles.
 
   **State compression after each run** (Phase 6):
-  - Append one row to STATE.md Ledger: `| R### | <delta> | <signal> | <verdict> | #N | [link](REPORTS/R###.md) |`
-  - Update affected beliefs' confidence based on verdict + signal
-  - Add new beliefs from "New hypotheses" (confidence 0.5, Literature `pending`)
-  - After a valid literature review, mark only its exact target belief `grounded (R###, date)`
-  - Refresh Frontier — remove completed delta; add mandatory literature-review entries before empirical candidates
+  - Append one Ledger row only for the completed coherent experiment: question, decisive result, conclusion, belief
+  - Update the affected belief from the conclusion and evidence strength
+  - Add at most one directly observed belief only when the explicit human goal requires it
+  - Refresh Frontier — remove the completed question; add at most one goal-relevant next experiment with its
+    decision result, minimum complete evidence, total ETA, and blocker
   - Update SYNTHESIS.md narrative if a paradigm shifted or a belief resolved
   - Phase 6b: curate `.gitignore`, stage only confirmed run files, commit the atomic run, push the configured
     research branch, and verify it reached the remote
@@ -186,7 +226,7 @@ The file should contain:
   - **Claude Code outside `/loop`**: just return to Phase 1 in the same turn. Do not invent a scheduling call.
   - **Codex**: use OS-level `at` since `/loop` doesn't exist on Codex —
     ```bash
-    echo "cd $(pwd) && codex exec --full-auto 'continue research loop — read STATE.md and proceed from Phase 1'" \
+    echo "cd $(pwd) && codex exec --approve-for-me 'continue research loop — read STATE.md and proceed from Phase 1'" \
         | at now + 30 minutes
     ```
     If `at`/`atrun` isn't available, continue in the same session and record the limitation in STATE.md Scratch. See SUPERVISOR.md Phase 7(b) for the full pattern.
@@ -226,9 +266,35 @@ For Codex, also add this section to `AGENTS.md` to prevent premature turn-ending
 Codex has a default behavior of surfacing progress to the user and closing the turn cleanly after completing work. In the research loop, this is wrong — emitting a user-facing summary between cycles causes Codex to treat it as a turn completion point and stop.
 
 Rules for the research loop:
+- Default to real experimental work: select one hypothesis question and the shortest complete experiment capable
+  of answering it. A new run ID, partial condition, audit, review, or gate is not progress.
+- Treat `PLAN.md` as a disposable working guide: normally spend at most 5 minutes and never more than 10 minutes
+  planning, then execute. Keep one editable plan only; do not create immutable copies, amendment classes, or
+  approval gates. Adapt it during execution and note only material scientific changes made after seeing results.
+- One run is one coherent answer: keep baseline, treatment, repetitions, necessary controls, verdict-changing
+  ablations, setup, retries, and analysis under one R###. Do not close the run after a trivial subset of that package.
+- Substantial means decision-complete, not artificially large. Choose the shortest complete package, stop when it
+  answers the claim, and do not pad it after the conclusion is credible.
+- Optimize wall-clock time to the complete answer. Once the human confirms `N` GPUs, allocate and give useful work
+  to all `N`; report wall-clock, throughput, and a lightweight per-rank work count inside the experiment.
+- If one model replica fits on one GPU, prefer DDP across all confirmed GPUs. Do not use tensor parallelism instead;
+  model/tensor sharding requires a concrete single-GPU memory or indivisible-operation constraint.
+- `GOAL` is a valid terminal boundary. Once the human's target hypothesis is adequately supported or contradicted
+  and the run is compressed/published, stop; do not invent mechanism studies or broader tests to keep cycling.
+- Communicate like a clear technical colleague: result first, decisive numbers second, then only the technical
+  detail needed to understand or reproduce it. Define unfamiliar terms in plain English. Do not use made-up
+  acronyms, internal loop jargon, abstract management language, or process narration in user-facing text.
+- Do not create standalone literature-review, experiment-survey, generic audit/gate, cleanup, refactor, setup,
+  smoke, retry, seed, condition, baseline, control, ablation, plot, or analysis runs.
+- Do not search scientific literature while a direct experiment exists. Use at most one 30-minute/8-source
+  direction recovery only after direct work fails and STATE/reports cannot yield another direction. It must produce
+  an executable direct experiment or trigger `AMBIGUITY`; it cannot repeat until new direct evidence exists.
+- If bounded setup/repair cannot reach the experiment, write `RUNS/R###/BLOCKER.md` and pause. Do not create a
+  research report, Ledger row, run-count increment, or new ID.
 - Do NOT emit user-facing progress messages between cycles. No "here's what I found so far." No "completed R003, ready for next pass."
 - Do NOT treat "substantial progress" as a reason to yield control. The interrupt boundaries in STATE.md Policy are the ONLY valid reasons to stop.
-- "Keep experiments short" means each experiment is fast to execute. It does NOT mean "run one cycle and stop." Short experiments = more cycles per session, not fewer.
+- "Keep experiments fast" means minimize time to a credible answer. It does not mean splitting one experiment
+  across many trivial run IDs.
 - **A cycle ends after Phase 6b is pushed and verified, not at Phase 4 (worker done), Phase 5 (report read), or Phase 6 (state compressed).** When the worker finishes, immediately ingest, compress, curate/stage/validate, commit, push, and verify in the same turn. "The experiment succeeded" and "STATE.md is updated" are not stopping conditions.
 - After updating STATE.md (Phase 6), go directly through Phase 6b, then back to Phase 1. Do not produce user-facing output between these steps.
 - The only time you talk to the human is when an interrupt boundary fires.
@@ -248,7 +314,10 @@ The environment agent should:
   - **pixi**: `which pixi`, look for `pixi.toml` / `pixi.lock`
   - **poetry**: `which poetry`, look for `pyproject.toml` with `[tool.poetry]`
   Record the manager (`conda` / `mamba` / `uv` / `venv` / `pixi` / `poetry`) and the exact activation command in STATE.md Environment and INFRA.md.
-- Check GPU availability if relevant (`nvidia-smi`). Record all available GPUs and set `CUDA_VISIBLE_DEVICES` to use all of them by default. Note the parallelism strategy (DataParallel, DistributedDataParallel, or independent runs per GPU).
+- Check GPU availability if relevant (`nvidia-smi`). Record all available GPUs. Detection is not allocation
+  permission: ask the human for the exact GPU count approved for experiment jobs and record it
+  in STATE.md and INFRA.md. Once `N` is confirmed, every GPU experiment allocates all `N`, assigns useful work to each,
+  and uses the layout with the shortest wall-clock time to the complete answer.
 - Check CPU cores (`nproc` / `sysctl -n hw.ncpu`) and record in Environment. Workers use this to set parallelism (e.g. num_workers, joblib n_jobs).
 - Verify key dependencies are importable
 - Install missing packages within the env
@@ -358,8 +427,14 @@ After basic environment setup, create INFRA.md from `templates/INFRA.template.md
    *Parallelism:*
    - 0 GPUs → CPU multiprocessing (`n_jobs` = core count)
    - 1 GPU → single GPU
-   - 2+ GPUs, model fits 1 GPU → DDP with `torchrun --nproc_per_node=N`
+   - 2+ confirmed GPUs, model fits 1 GPU → DDP across all confirmed GPUs with `torchrun --nproc_per_node=N`
    - 2+ GPUs, model doesn't fit → FSDP SHARD_GRAD_OP (ZeRO-2) or FULL_SHARD (ZeRO-3)
+   - Do not use tensor parallelism when DDP can run the same work. Tensor/model sharding is a fallback only when a
+     replica cannot fit on one GPU or the required operation cannot be divided into independent per-GPU work.
+   - For independent experiment arms or seeds, run them concurrently across confirmed GPUs when that is faster and
+     does not bias the comparison. If runtime is the measured outcome, give each condition the same all-GPU layout.
+   - Collect wall-clock, throughput, and per-rank sample/batch counts inside the real experiment; this is not a
+     separate utilization test or gate.
    - Prefer FSDP over gradient checkpointing when multiple GPUs are available
    - Note `accelerate` if installed (simplified multi-GPU launch for HF workflows)
 
@@ -648,7 +723,9 @@ The research loop runs shell commands (python scripts, data processing, etc.). C
 ```
 For full autonomy (if the human agrees), use `"allow": ["Bash(*)"]`. The active Python env (conda/uv/venv) is the safety boundary — package installs land there, not system-wide.
 
-**Codex** — runs in a sandboxed container by default, so permissions are less of a concern. Use `--full-auto` flag when launching. Ensure the container image has the right Python env (conda/uv/venv) and dependencies pre-installed, or let the agent install them.
+**Codex** — runs in a sandboxed container by default, so permissions are less of a concern. Use `--approve-for-me`
+when launching automated work. Ensure the container image has the right Python env (conda/uv/venv) and
+dependencies pre-installed, or let the agent install them.
 
 **Other agents** — configure equivalent auto-approval for shell commands per the agent's docs.
 
@@ -675,10 +752,8 @@ distinct external-write actions; record the answer in STATE.md Environment and C
 ## Step 4: Create project structure
 
 ```
-mkdir -p REPORTS RUNS LITERATURE
+mkdir -p REPORTS RUNS
 ```
-
-Create `LITERATURE/INDEX.md` from `templates/LITERATURE_INDEX.template.md`, with one pending row per seed belief.
 
 ---
 
@@ -687,9 +762,9 @@ Create `LITERATURE/INDEX.md` from `templates/LITERATURE_INDEX.template.md`, with
 Use `templates/STATE.template.md` as structure. Fill in from the interview:
 - Project name, goal, date
 - Seed beliefs from the human's hypotheses (confidence 0.5)
-- Mark every seed belief Literature `pending`
-- Initial frontier: for each belief, place a dedicated literature-review delta before and as the blocker for the
-  empirical delta that would discriminate it
+- Set `last_experimental_evidence: none` and `direction_recovery_used_since_experiment: false`
+- Initial frontier: add only a few decision-capable experiment questions with exact decision results, minimum
+  complete evidence packages, total ETAs, and entry points; shortest adequate package ranks first
 - Policy: budget, interrupt thresholds
 - Environment section populated by environment agent
 - INFRA.md populated by environment agent (detailed hardware profile and optimization playbook — STATE.md Environment stays minimal)
@@ -700,8 +775,8 @@ Also create initial SYNTHESIS.md from templates/SYNTHESIS.template.md with proje
 
 ## Step 6: Confirm with human
 
-Show STATE.md and the written CLAUDE.md/AGENTS.md. Are the seed beliefs right? Do the literature-review rounds ask
-the right grounding questions before each empirical delta? Is the frontier targeting the right questions?
+Show STATE.md and the written CLAUDE.md/AGENTS.md. Are the seed beliefs right? Does each top frontier item create a
+new observation that could change one of them? Is the first experiment the shortest useful test of the goal?
 Anything missing from the environment setup? Are permissions configured correctly? Is the Git remote/research
 branch correct, and is the recorded commit/push authorization accurate?
 

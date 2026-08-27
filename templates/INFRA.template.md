@@ -17,6 +17,7 @@
 | 0 | (e.g. A100-SXM4-80GB) | 80 | 8.0 | 535.129.03 | 12.2 |
 
 - **total GPU count**: (N)
+- **human-confirmed GPU count**: (exact N approved for experiment jobs, or unconfirmed)
 - **topology**: (NVLink / PCIe — from `nvidia-smi topo -m` if available)
 - **CUDA_VISIBLE_DEVICES**: (e.g. `0,1,2,3`)
 
@@ -88,7 +89,8 @@
      Multi-node         → FSDP or DeepSpeed with NCCL backend
 
      Sharding strategy for multi-GPU when model fits in 1 GPU:
-       DDP — replicate model on each GPU, sync gradients. Fastest when model fits.
+       DDP — replicate model on each GPU, split batches/samples, sync gradients or metrics. This is
+       the default and is normally faster than tensor parallelism when a replica fits.
      When model doesn't fit in 1 GPU:
        FSDP SHARD_GRAD_OP (≈ ZeRO-2) — shard optimizer states + gradients. Model stays replicated.
        FSDP FULL_SHARD (≈ ZeRO-3) — shard everything. Lowest memory, higher communication.
@@ -99,6 +101,9 @@
 - **launch command**: (e.g. `torchrun --nproc_per_node=4 script.py`)
 - **accelerate config**: (e.g. "Use `accelerate launch --multi_gpu --num_processes=4` if using HuggingFace Accelerate")
 - **rationale**: (e.g. "4 GPUs with NVLink — DDP is fastest; switch to FSDP FULL_SHARD if model exceeds single-GPU VRAM")
+- **all-GPU work rule**: (how every human-confirmed GPU gets useful samples/batches/conditions; never leave an approved GPU idle)
+- **tensor parallel fallback**: (exact single-GPU memory or indivisible-operation constraint; otherwise "forbidden because DDP fits")
+- **utilization evidence**: (per-rank sample/batch count, throughput, wall-clock, and peak memory or already-available sampled utilization; collected inside the real run, never as a separate gate)
 - **batch sizing**: (e.g. "80GB A100 at BF16: ~32 per-device batch for 7B model. Effective batch = per_device × n_gpus × grad_accum_steps.")
 - **gradient accumulation**: (e.g. "If target effective batch is 256 and per_device_batch=32 on 4 GPUs: grad_accum_steps = 256 / (32 × 4) = 2")
 - **CPU parallelism**: (e.g. "64 cores — use `n_jobs=64` for joblib, `num_workers=8` for DataLoader")
@@ -155,7 +160,7 @@
 <!-- For evaluation, benchmarking, and generation workloads. -->
 - **torch.inference_mode**: "Use `with torch.inference_mode():` instead of `torch.no_grad()` — stricter, faster"
 - **batched inference**: (e.g. "vLLM installed — use for batched LLM generation with continuous batching and PagedAttention")
-- **tensor parallelism**: (e.g. "For models that don't fit on 1 GPU during inference: vLLM `tensor_parallel_size=4`")
+- **tensor parallelism**: (fallback only when the model/operation cannot run on one GPU; if a replica fits, shard independent inference examples with DDP/multiprocess workers instead)
 - **static KV cache**: (e.g. "For repeated generation: pre-allocate KV cache to avoid reallocation")
 - **quantization**: (e.g. "bitsandbytes installed — 4-bit/8-bit quantization available for fitting larger models in VRAM. Use for inference; avoid for training unless necessary.")
 
@@ -251,7 +256,7 @@
 <!-- Lab/group/cluster conventions that aren't discoverable from commands. Ask the user. -->
 
 - **walltime convention**: (e.g. "request the minimum needed — short jobs get higher priority")
-- **GPU request convention**: (e.g. "request 1 GPU unless training needs more — queue time grows with count")
+- **GPU request convention**: (request the exact human-confirmed count; once N is approved, allocate and give useful work to all N; account for queue time when estimating time-to-answer)
 - **fairshare considerations**: (e.g. "lab share is shared with 5 others — long jobs reduce others' priority")
 - **forbidden actions**: (e.g. "do not run GPU work on login node, do not write >1GB to home")
 - **other**: (anything else the user mentioned — local quirks, lab rules, on-call)

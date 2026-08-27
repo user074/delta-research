@@ -12,8 +12,7 @@ Every run must organize outputs into these directories:
 
 ```
 RUNS/R###/
-├── PLAN.initial.md                # Immutable preregistration snapshot
-├── PLAN.md                        # Live versioned plan; controlled amendments allowed
+├── PLAN.md                        # Short editable working guide
 ├── experiment.py                  # Generated script (SLURM mode only)
 ├── job.sh                         # SLURM job script (SLURM mode only)
 ├── slurm-<JOB_ID>.out             # Raw SLURM stdout (SLURM mode only)
@@ -32,10 +31,10 @@ RUNS/R###/
 ```
 
 **Rules:**
-- **PLAN.initial.md / PLAN.md** — The supervisor creates byte-identical copies before execution. Preserve the
-  initial snapshot. Workers repair Class A execution bugs in the live plan, increment `plan_version`, and append
-  its Amendment Log. Class B changes require supervisor approval in the same run; Class C redesign requires a new
-  run. Never revise scientific targets or predictions in response to observed outcomes.
+- **PLAN.md** — One editable working guide. The worker changes it directly as execution develops; no immutable
+  copy, versioning, amendment classes, or approval workflow. Mechanical changes need no note. If results were
+  already visible before a material scientific change, append one transparent Working note and treat affected
+  results as exploratory.
 - **logs/** — Dense, append-only text files. One line per step or event. For humans to analyze what happened in detail. Name files by purpose (e.g. `train.log` for training, `benchmark.log` for benchmarks, `analysis.log` for data analysis).
 - **metrics/** — Structured JSON. Machine-readable, used by the report generator and wandb sync. Name files by phase (e.g. `results.json`, `training_history.json`, `scores.json`).
 - **checkpoints/** — Large model weights and optimizer states. Separate from `artifacts/` so the whole tree can be gitignored (`RUNS/*/checkpoints/`). On clusters, this directory may be a symlink to a scratch path from INFRA.md (e.g. `/scratch/$USER/{RUN_ID}/`) — the report still references `checkpoints/<file>` regardless.
@@ -165,7 +164,8 @@ DELTA markers are the sparse signaling channel. The monitoring script (`scripts/
 | `[DELTA-START]` | Experiment began | Once, at the start of `experiment.py` |
 | `[DELTA-PROGRESS]` | Progress update | At meaningful milestones (10%, 25%, 50%, 75%, 90%) |
 | `[DELTA-METRIC]` | Key metric report | After evaluation steps, at log intervals |
-| `[DELTA-DONE]` | Successful completion | Once, at the very end after all cleanup |
+| `[DELTA-SMOKE-DONE]` | Smoke job passed | Once after smoke validation; permits the main job but does not complete R### |
+| `[DELTA-DONE]` | Process/job completed | Once, at the very end after all cleanup |
 | `[DELTA-ERROR]` | Recoverable error | On exceptions that don't halt the experiment |
 | `[DELTA-BLOCKER]` | Unrecoverable failure | On fatal errors — experiment cannot continue |
 
@@ -175,6 +175,7 @@ DELTA markers are the sparse signaling channel. The monitoring script (`scripts/
 [DELTA-START] R### | <ISO timestamp>
 [DELTA-PROGRESS] <pct>% | <message>
 [DELTA-METRIC] <key>=<value> | <key>=<value>
+[DELTA-SMOKE-DONE] R### | elapsed=<duration> | status=smoke_passed
 [DELTA-DONE] R### | elapsed=<duration> | status=completed
 [DELTA-ERROR] <message>
 [DELTA-BLOCKER] R### | <message>
@@ -183,10 +184,15 @@ DELTA markers are the sparse signaling channel. The monitoring script (`scripts/
 ### Terminal markers
 
 The monitoring script exits when it sees one of these:
-- `[DELTA-DONE]` → exit 0 (success)
+- `[DELTA-SMOKE-DONE]` → exit 0 (smoke success; continue to the main experiment, no report/state update)
+- `[DELTA-DONE]` → exit 0 (the monitored process succeeded)
 - `[DELTA-BLOCKER]` → exit 1 (fatal failure)
 
 `[DELTA-ERROR]` is **recoverable** — printed to the agent but does not terminate monitoring. Use it for non-fatal exceptions (e.g., one eval batch failed but training continues). Use `[DELTA-BLOCKER]` for truly fatal errors.
+
+`[DELTA-DONE]` does not by itself complete R###. After it appears, the worker checks PLAN.md. If another baseline,
+condition, repetition, control, ablation, or analysis is required for the conclusion, continue under the same run
+ID. Only the complete evidence package permits `REPORTS/R###.md` and state compression.
 
 All other markers (`START`, `PROGRESS`, `METRIC`, `ERROR`) are informational.
 
@@ -223,6 +229,9 @@ def delta_metric(**kwargs):
 
 def delta_done(elapsed):
     print(f"[DELTA-DONE] {RUN_ID} | elapsed={elapsed} | status=completed", flush=True)
+
+def delta_smoke_done(elapsed):
+    print(f"[DELTA-SMOKE-DONE] {RUN_ID} | elapsed={elapsed} | status=smoke_passed", flush=True)
 
 def delta_error(message):
     print(f"[DELTA-ERROR] {message}", flush=True)
@@ -346,16 +355,21 @@ INFRA.md → Job Execution → `mode` selects the workflow: `direct` (agent runs
 
 The agent runs `experiment.py` directly on the local machine — no scheduler, no `job.sh`, no `slurm-*.out`. The agent process owns the run lifecycle.
 
-#### Step 0 — Smoke test (required for non-trivial runs)
+#### Step 0 — Optional risk probe
 
-Same rationale as SLURM mode (see below): a 5-15 minute smoke test catches OOM, dataset path issues, precision bugs, DataLoader bottlenecks, and walltime miscalibration before the hero run burns hours. The "skip" rules and "common things smoke tests catch" list both apply unchanged.
+Skip this step unless the working plan names one concrete costly-run failure risk that a short probe can resolve.
+A smoke test is not a general readiness gate and must use at most 10% of the run budget.
+
+The smoke test is a setup step inside the same R### as the main experiment. A passing smoke test does not produce
+`REPORTS/R###.md`, enter the Ledger, update beliefs, or complete the run; continue immediately to the main command.
 
 **Procedure:**
 1. Generate `experiment_smoke.py` — same code as `experiment.py`, parameterized for the smoke config (small dataset slice, few steps, small batch, 1 GPU)
 2. Run and capture: `python {PROJECT_ROOT}/RUNS/{RUN_ID}/experiment_smoke.py 2>&1 | tee {PROJECT_ROOT}/RUNS/{RUN_ID}/logs/smoke.out`
 3. Extract throughput, peak VRAM (e.g. `nvidia-smi --query-gpu=memory.used --format=csv` during the run), time per step
-4. Compare against the plan's `Smoke Test → validate` and `abort` thresholds — same rules as SLURM mode (VRAM > 90% → reduce batch; throughput implies hero > 1.5× plan estimate → revise; any error → fix and re-smoke)
-5. Only run the hero if smoke passes
+4. Compare against the plan's single `continue when` condition; adapt the working plan/code directly if needed
+5. On success, immediately run the measurement. If the probe cannot resolve its named risk within its cap, stop
+   only if that risk is an actual blocker.
 
 #### Step 1 — Generate `experiment.py`
 
@@ -404,7 +418,8 @@ When wandb is enabled, share the run URL with the human at submission time — t
 - If wandb mode is `offline`: `wandb sync {PROJECT_ROOT}/RUNS/{RUN_ID}/wandb/`
 - If wandb mode is `online` (typical for direct): nothing to sync — run is already on the dashboard
 - Read `logs/run.out` and `logs/stderr.log` for any details not captured by markers
-- Write the report to `REPORTS/{RUN_ID}.md` as usual
+- After every condition in the planned evidence package is complete, write `REPORTS/{RUN_ID}.md`. One successful
+  command is not enough when the conclusion requires additional conditions, controls, or ablations.
 
 #### Step 4 — Failure recovery
 
@@ -412,9 +427,9 @@ If the process exits non-zero (DELTA-BLOCKER or unhandled exception):
 1. Read `logs/run.out` and `logs/stderr.log` to diagnose
 2. Common fixes: OOM → reduce batch / enable gradient checkpointing; missing dependency → `pip install`; CUDA error → check GPU is visible (`nvidia-smi`) and not held by another process; env mismatch → re-validate against INFRA.md `validated env activation`
 3. Apply the fix to `experiment.py`, re-run. Iterate up to 2-3 times.
-4. Only escalate to BLOCKER if the failure is structural — wrong assumption in the plan, missing data, or environment issue requiring human action.
+4. Only escalate to BLOCKER if the failure is structural — wrong assumption in the plan, missing data, or environment issue requiring human action. Write `RUNS/{RUN_ID}/BLOCKER.md` using `templates/BLOCKER.template.md`; do not write a research report, append the Ledger, increment the run count, or allocate a new ID.
 
-This recovery happens *inside the run* — the supervisor sees one report covering the final outcome.
+Recovery happens *inside the run*. If it succeeds, the supervisor sees one report covering the complete outcome.
 
 ---
 
@@ -422,25 +437,30 @@ This recovery happens *inside the run* — the supervisor sees one report coveri
 
 When execution mode is `slurm`, the worker generates self-contained scripts and submits via SLURM. The agent runs on the login node — never execute GPU workloads directly.
 
-#### Step 0 — Smoke test (required for non-trivial runs)
+#### Step 0 — Optional risk probe
 
-Before submitting the hero run, validate the setup with a 5-15 minute smoke test. The plan's `## Smoke Test` section defines the parameters. The cost is small; the savings are large — a failed 4-hour run wastes 4 hours of compute *and* queue time.
+Do not create a smoke job by default. Use one only when the working plan names a concrete failure risk for an
+expensive job and a probe bounded to at most 10% of the run budget can resolve it.
+
+Smoke and hero are one research run. A completed smoke job is not research evidence and must not trigger a report,
+state compression, publication, or a new R###. Continue to the main job under the same plan and run ID.
 
 **Procedure:**
 1. Generate `experiment_smoke.py` — same code as `experiment.py`, but parameterized for the smoke config (small dataset slice, few steps, small batch, 1 GPU)
 2. Generate `job_smoke.sh` — same env activation, but with the smoke walltime, GPUs, and the fast-queue partition (from INFRA.md → Cluster → Partitions, if one exists)
 3. Submit and wait: `JOB_ID=$(sbatch --parsable {PROJECT_ROOT}/RUNS/{RUN_ID}/job_smoke.sh)` then `bash scripts/wait_for_job.sh ${JOB_ID} {PROJECT_ROOT}/RUNS/{RUN_ID}/slurm-smoke-${JOB_ID}.out`
 4. Read the smoke output to extract: throughput (steps/sec or tokens/sec), peak VRAM, time per step
-5. Compare against plan's `Smoke Test → validate` and `abort` thresholds:
-   - **VRAM > 90%** → reduce hero batch size (or enable gradient checkpointing) before submitting hero run
-   - **Throughput implies hero walltime > 1.5× plan estimate** → either revise the plan's walltime or reduce hero scope
-   - **Any error** → debug, fix, re-run smoke. Don't proceed to hero run with unresolved errors.
-6. Only submit the hero run if the smoke test passes
+5. Compare against the plan's single `continue when` condition. Edit the working plan/scripts directly when the
+   result requires a path, batch, precision, resource, or walltime change.
+6. On success, `experiment_smoke.py` emits `[DELTA-SMOKE-DONE]`; `wait_for_job.sh` exits 0 without treating R### as complete.
+7. On success, submit the measurement immediately. If the probe cannot resolve its named risk within its cap, stop
+   only when that risk is an actual blocker; do not invent another gate.
 
-**Skip the smoke test ONLY when:**
-- The run is <10 minutes total (smoke test isn't faster than the run itself)
-- It's a deterministic analysis with no GPU model training
-- A nearly-identical config (same data, same model, same hardware) succeeded in the last 24 hours — record this in the report's Method section
+**A smoke test is justified only when all are true:**
+- The main run is materially expensive relative to the probe
+- One specific failure risk is plausible and observable in the probe
+- The probe consumes at most 10% of the run budget
+- Its result will immediately change execution or authorize the measurement; it is not generic validation
 
 **Common things smoke tests catch** (each one is a wasted hero run if missed):
 - Dataset path not mounted on compute nodes
@@ -488,7 +508,7 @@ echo "Submitted job ${JOB_ID}"
 bash {PROJECT_ROOT}/scripts/wait_for_job.sh ${JOB_ID} {PROJECT_ROOT}/RUNS/{RUN_ID}/slurm-${JOB_ID}.out
 ```
 
-**Do NOT manually poll `squeue -j` or `tail -f` the output file in a loop.** `wait_for_job.sh` already does this with a FIFO-based reader and a 30s safety net for vanished jobs. Repeated `squeue` polling wastes tokens and adds latency. The script blocks until DELTA-DONE / DELTA-BLOCKER, then exits with the right code.
+**Do NOT manually poll `squeue -j` or `tail -f` the output file in a loop.** `wait_for_job.sh` already does this with a FIFO-based reader and a 30s safety net for vanished jobs. Repeated `squeue` polling wastes tokens and adds latency. The script blocks until DELTA-SMOKE-DONE / DELTA-DONE / DELTA-BLOCKER, then exits with the right code.
 
 **For long jobs**, the human-facing observability is wandb. The DELTA markers in stdout give the agent automation signals (start, milestones, done); wandb gives the human a live dashboard with metrics, plots, and ETA. If wandb is enabled, share the run URL with the human at submission time so they can watch progress without reading the SLURM output.
 
@@ -497,7 +517,7 @@ bash {PROJECT_ROOT}/scripts/wait_for_job.sh ${JOB_ID} {PROJECT_ROOT}/RUNS/{RUN_I
 After the job completes:
 - If wandb mode is `offline`, sync: `wandb sync RUNS/{RUN_ID}/wandb/`
 - Read the full SLURM output file for any details not captured by markers
-- Write the report to `REPORTS/{RUN_ID}.md` as usual
+- After every job/condition in the planned evidence package is complete, write `REPORTS/{RUN_ID}.md`.
 
 #### Step 5 — Failure recovery
 
@@ -505,6 +525,8 @@ If `wait_for_job.sh` exits non-zero (DELTA-BLOCKER, vanished, timeout):
 1. Read the SLURM output file and `RUNS/{RUN_ID}/logs/stderr.log` to diagnose
 2. Common fixes: OOM → reduce batch / enable gradient checkpointing; missing path → check the path is mounted on compute nodes; env activation failed → re-validate against INFRA.md `validated env activation`; CUDA error → check GPU was actually requested
 3. Apply the fix to `experiment.py` or `job.sh`, resubmit. Iterate up to 2-3 times.
-4. Only escalate to BLOCKER (and report to supervisor) if the failure is structural — a wrong assumption in the plan, missing data, or an environment problem requiring human action.
+4. Only escalate to BLOCKER if the failure is structural. Write `RUNS/{RUN_ID}/BLOCKER.md` using `templates/BLOCKER.template.md`; do not write a
+   research report, append the Ledger, increment the run count, or allocate a new ID.
 
-This recovery happens *inside the run* — the supervisor sees one report covering the final outcome. Don't surface mid-run failures unless they're blockers.
+Recovery happens *inside the run*. If it succeeds, the supervisor sees one report covering the complete outcome.
+Don't surface mid-run failures unless they are genuine blockers.

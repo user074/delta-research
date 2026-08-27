@@ -19,6 +19,7 @@
 | 3 | NVIDIA A100-SXM4-80GB | 80 | 8.0 | 535.129.03 | 12.2 |
 
 - **total GPU count**: 4
+- **human-confirmed GPU count**: 4
 - **topology**: NVLink (`NV12` full mesh across all 4 GPUs, CPU affinity `0-63`, NUMA node `0`)
 - **CUDA_VISIBLE_DEVICES**: `0,1,2,3`
 
@@ -50,17 +51,20 @@
 
 ### Compilation
 - **available**: yes — PyTorch 2.4.0+cu122
-- **recommended mode**: `"reduce-overhead"` for training; use `"max-autotune"` only for fixed-shape inference benchmarks after adding `triton`
+- **recommended mode**: `"reduce-overhead"` for fixed-shape training; use `"max-autotune"` for steady-state inference benchmarks after installing `triton`
 - **usage**: `model = torch.compile(model, mode="reduce-overhead")`
-- **caveats**: `torch.compile` is present in PyTorch 2.4, but standalone `triton` is not installed, so treat TorchInductor-backed speedups as an optimization gap and verify wins before enabling globally. First iteration pays compilation cost; highly dynamic shapes can trigger graph breaks. Disable for debugging with `TORCH_COMPILE_DISABLE=1`.
+- **caveats**: The `torch.compile` API is present in PyTorch 2.4, but `triton` is not installed; do not rely on CUDA TorchInductor speedups until Triton is installed and the compiled path is benchmarked. First iteration pays compilation cost, and highly dynamic shapes can trigger graph breaks or recompilation. Disable for debugging with `TORCH_COMPILE_DISABLE=1`.
 
 ### Parallelism
 - **strategy**: DDP
 - **launch command**: `torchrun --nproc_per_node=4 script.py`
 - **accelerate config**: Use `accelerate launch --multi_gpu --num_processes=4 script.py` for Hugging Face workflows. If the model does not fit within 80 GB on one GPU, switch to FSDP `FULL_SHARD` or DeepSpeed ZeRO-3.
 - **rationale**: This machine has 4 identical A100-80GB GPUs connected by NVLink, so DDP is the fastest default when the model fits on a single GPU. For larger models, keep the same 4-GPU node and move to FSDP or DeepSpeed rather than relying on checkpointing alone.
-- **batch sizing**: On 80 GB A100s in BF16, start from the largest per-device batch that keeps each GPU below roughly 70-75 GB used. For 7B-class SFT or LoRA at about 2k tokens, `per_device_train_batch_size=4-8` is a practical starting range.
-- **gradient accumulation**: If the target effective batch is 256 sequences and `per_device_train_batch_size=8` on 4 GPUs, use `grad_accum_steps = 256 / (8 × 4) = 8`.
+- **all-GPU work rule**: Launch four DDP ranks and shard training/evaluation samples so every confirmed GPU processes real batches; run independent conditions concurrently only when that shortens wall-clock time without biasing the comparison.
+- **tensor parallel fallback**: Forbidden while one BF16 model replica fits in 80 GB; use tensor/model sharding only for a measured single-GPU memory or indivisible-operation constraint.
+- **utilization evidence**: Record launch-to-result wall-clock time, aggregate throughput, per-rank sample/batch counts, and peak allocated memory inside the experiment; use sampled GPU utilization when already available, never a separate gate.
+- **batch sizing**: In BF16, increase the per-device microbatch during a smoke test until peak allocation remains below about 72 GB (90% of each 80 GB GPU), leaving headroom for activations and allocator fragmentation. Sequence length and optimizer state make a fixed batch number unsafe; use FSDP for full fine-tuning when model plus optimizer state cannot fit on one GPU.
+- **gradient accumulation**: Compute `grad_accum_steps = target_effective_batch / (per_device_batch × 4)`. For example, target 256 with `per_device_batch=8` requires `256 / (8 × 4) = 8` accumulation steps.
 - **CPU parallelism**: 64 physical cores are available. Use `n_jobs=64` for CPU-bound preprocessing and start DataLoader workers around 16 total, then scale toward 24-32 only if preprocessing is the bottleneck.
 
 ### Data Loading
@@ -109,7 +113,7 @@
 ### Inference Optimization
 - **torch.inference_mode**: "Use `with torch.inference_mode():` instead of `torch.no_grad()` — stricter, faster"
 - **batched inference**: `vllm 0.5.0` is installed — use it for high-throughput batched LLM generation with continuous batching and PagedAttention
-- **tensor parallelism**: For models that do not fit in 80 GB on one GPU at inference time, use vLLM with `tensor_parallel_size=4`
+- **tensor parallelism**: Use vLLM with `tensor_parallel_size=4` only when the model or required operation cannot fit on one 80 GB GPU; otherwise shard independent examples across four DDP/multiprocess workers.
 - **static KV cache**: For repeated generation, pre-allocate KV cache or use an engine that reuses cache blocks to reduce allocation churn
 - **quantization**: `bitsandbytes 0.43.1` is installed, so 4-bit and 8-bit quantization are available for inference when BF16 no longer fits comfortably in 80 GB.
 
@@ -151,18 +155,24 @@
 
 ## Cluster
 
-- **scheduler**: N/A — local machine
-- **login host**: N/A
-- **partition**: N/A
-- **account/project**: N/A
-- **QOS**: N/A
-- **max walltime**: N/A
-- **max GPUs per job**: N/A
-- **module loads**: N/A
-- **submission template**:
-```bash
-# N/A — local machine
-```
+N/A — local machine. No SLURM, PBS, or LSF scheduler was detected, so the cluster-only subsections are intentionally skipped as directed by the template.
+
+---
+
+## Job Execution
+
+- **mode**: direct
+- **project root**: `/home/researcher/llm-finetune`
+- **env manager**: conda
+- **validated env activation**:
+  ```bash
+  conda activate llm-ft
+  ```
+- **wandb mode**: disabled (not configured in the supplied profile)
+- **wandb project**: N/A
+- **wandb entity**: N/A
+- **test job status**: not run
+- **test job notes**: Local direct-execution server; a scheduler test job is not applicable. The activation command is the command captured in the supplied profile.
 
 ---
 
@@ -177,6 +187,6 @@
 
 ## Profiling Source
 - **method**: auto-profiled
-- **profiled on**: 2026-04-12
-- **host**: unknown (hostname not included in supplied profile)
+- **profiled on**: 2026-08-27
+- **host**: not captured in `SYSTEM_PROFILE.md`
 - **notes**: Generated from `tests/initialization/SYSTEM_PROFILE.md` for a local server profile. The supplied profiling fixture did not include a hostname field.

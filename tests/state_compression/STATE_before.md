@@ -6,60 +6,47 @@
 - **started**: 2026-02-20
 - **last_updated**: 2026-02-22
 - **total_runs**: 2
+- **last_experimental_evidence**: R002
+- **direction_recovery_used_since_experiment**: false
 - **status**: active
 - **paradigm**: v1
 
----
-
 ## Environment
-- **conda/venv**: `conda activate sorting-perf`
+- **env activation**: `conda activate sorting-perf`
 - **python**: 3.11.5
 - **key packages**: numpy 1.26.0, matplotlib 3.8.0, pandas 2.1.0
 - **gpu**: N/A
-- **checkpoints**: N/A
+- **confirmed gpu count**: N/A
 - **datasets**: `data/synthetic_arrays.npz`
 - **working dir**: /home/user/sorting-perf
 
----
-
 ## BeliefState
 
-| # | Parent | Belief | Status | Confidence | Literature | Key evidence | Last updated |
-|---|--------|--------|--------|------------|------------|--------------|--------------|
-| 1 | — | Timsort's advantage over quicksort grows with nearly-sorted data | active | 0.7 | grounded (R000, 2026-02-20) | R001: 3.2x faster on 90%-sorted arrays (1M elements) | 2026-02-21 |
-| 2 | — | Memory allocation is the dominant cost for large arrays (>1M), not comparisons | active | 0.5 | grounded (R000, 2026-02-20) | R002: inconclusive — alloc time noisy | 2026-02-22 |
-| 3 | — | Duplicate-heavy distributions reduce sorting time due to equal-element optimizations | active | 0.45 | grounded (R000, 2026-02-20) | seed — untested | 2026-02-20 |
+| # | Parent | Belief | Status | Confidence | Key evidence | Last updated |
+|---|--------|--------|--------|------------|--------------|--------------|
+| 1 | — | Timsort's advantage over quicksort grows with nearly-sorted data | active | 0.7 | R001: 3.2× faster on 90%-sorted arrays | 2026-02-21 |
+| 2 | — | Allocation and copying account for more than half of copy-plus-sort time above 1M elements | active | 0.5 | R002 timing was too noisy | 2026-02-22 |
+| 3 | — | Duplicate-heavy distributions reduce sorting time | active | 0.45 | seed — untested | 2026-02-20 |
 
 ## Ledger
 
-| Run | Delta | Signal | Verdict | Belief | Link |
-|-----|-------|--------|---------|--------|------|
-| R001 | Compare timsort vs quicksort on nearly-sorted 1M arrays | discriminating | supports | #1 | [R001](REPORTS/R001.md) |
-| R002 | Profile memory allocation vs comparison time on random 5M arrays | partial | unclear | #2 | [R002](REPORTS/R002.md) |
+| Run | Question | Key result | Conclusion | Belief | Link |
+|-----|----------|------------|------------|--------|------|
+| R001 | Does Timsort beat quicksort on nearly-sorted 1M arrays? | Timsort was 3.2× faster | supports | #1 | [R001](REPORTS/R001.md) |
+| R002 | Do allocation and copying exceed half of copy-plus-sort time? | Timing was too noisy | cannot decide | #2 | [R002](REPORTS/R002.md) |
 
 ## Frontier
 
-| Rank | Delta | Target | Uncertainty | Info gain | Feasibility | Rationale | Blocked by |
-|------|-------|--------|-------------|-----------|-------------|-----------|------------|
-| 1 | Benchmark sorting on arrays with 50%, 80%, 95% duplicate ratios across sizes 1K-10M | #3 | high | high | high | Direct test of duplicate optimization | — |
-| 2 | Isolate alloc cost by pre-allocating output buffer | #2 | high | med | med | R002 noisy — pre-allocation removes alloc entirely | — |
+| Rank | Experiment question | Target | Decision result | Minimum complete evidence | ETA | Blocked by |
+|------|---------------------|--------|-----------------|---------------------------|-----|------------|
+| 1 | Do duplicate-heavy inputs reduce Python sorting time? | #3 | 1M/95% speedup >1.2× supports; <1.05× contradicts | Four sizes/ratios, three repetitions, `list.sort()` control | 8 min | — |
+| 2 | Do allocation and copying exceed half of copy-plus-sort time? | #2 | Fraction >0.50 supports; <0.50 contradicts | Paired 5M/10M intervals exclude 0.50 | 25 min | — |
 
 ## Policy
-
-### Interrupt boundaries
-- `BUDGET`: 2 hours cumulative
-- `NULL_STREAK`: 3 consecutive null-signal runs
-- `BLOCKER`: worker returns BLOCKER
-- `AMBIGUITY`: frontier empty AND regeneration fails
-- `IRREVERSIBLE`: irreversible action needs human approval
-
-### Scoring
-- Signal: `discriminating` (clearly moved a belief) | `partial` (some evidence) | `null` (no info)
-- Verdict: `supports` | `contradicts` | `unclear` | `BLOCKER`
-
-### Constraints
-- One major delta per run
-- Worker must not modify STATE.md or choose directions
+- `GOAL`: target hypothesis decided and no requested question remains
+- `NULL_STREAK`: 3 consecutive completed experiments cannot decide
+- `STALL`: no decision-capable experiment can be specified
+- `BLOCKER`: selected experiment cannot proceed after bounded repair
 
 ## Scratch
-- R002 had high variance in alloc measurements — might need to pin CPU frequency or use median of 50+ trials
+- R002 had high variance in allocation measurements.

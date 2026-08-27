@@ -1,17 +1,14 @@
 # wandb Report Generation
 
-> Spec for the wandb Report sub-agent. The supervisor spawns this agent
-> on significant events. It reads the current research state and produces
-> a cumulative, versioned wandb Report snapshot.
+> Optional spec for a human-requested or policy-required wandb Report. It reads the current research state and
+> produces a cumulative, versioned snapshot without blocking experiments.
 
 ---
 
 ## When the supervisor triggers this
 
-The supervisor spawns this sub-agent when ANY of these occur:
-1. **Paradigm shift** — a core belief was rejected or confidence dropped >= 0.3
-2. **Belief resolved** — a belief reached `supported` or `rejected`
-3. **Every 5 runs** — periodic snapshot for observability
+The supervisor spawns this sub-agent only when the human explicitly requested a wandb Report or active project
+policy requires one. A resolved belief, run count, or internal state change is not by itself a trigger.
 
 The supervisor passes: `VERSION` (v1, v2, ...), `WANDB_PROJECT`, `PROJECT_NAME`, `LATEST_RUN`.
 
@@ -47,12 +44,14 @@ report = wr.Report(
 
 ### Report contents
 
-1. **Narrative** — from SYNTHESIS.md, as markdown blocks
-2. **Belief trajectory** — table or line plot showing confidence over runs for each belief
-3. **Cross-run metric comparisons** — pull metrics from wandb runs, create comparison panels
-4. **Key visualizations** — embed plots from `RUNS/R###/artifacts/` and wandb run panels
-5. **Run summary table** — from Ledger, with links to individual wandb runs
-6. **Interactive data** — wandb panel grids for metrics that benefit from interactive exploration
+Follow the Plain-English communication contract in `templates/SUPERVISOR.md`:
+
+1. **Answer first** — what the evidence supports, contradicts, or cannot decide
+2. **Best evidence** — exact numbers and what they mean
+3. **Tested scope** — model, data, metric, runtime, and hardware needed to interpret the result
+4. **What could change the answer** — only verdict-changing limitations
+5. **Optional visualization** — at most one per distinct decision, only when clearer than a table
+6. **Run links** — compact source table for readers who need implementation detail
 
 ### Plot quality rules (common pitfalls)
 

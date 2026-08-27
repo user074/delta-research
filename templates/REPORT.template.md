@@ -1,80 +1,91 @@
-# REPORT — (run ID)
+# REPORT — (run ID): (plain-English question)
 
-## Summary
-(2-3 sentences: what was tested, what was found, what it means for the research question)
+> A run is one coherent attempt to answer one hypothesis. Write this like a compact research paper, not an activity
+> log. Setup, smoke tests, retries, seeds, individual conditions, plots, and ablations are parts of this run—not
+> separate runs. Keep the main answer and all decision-relevant numbers inline.
+
+## Answer
+
+<!-- At most 80 words. First sentence says the result supports, contradicts, or cannot yet decide the hypothesis in
+     the tested scope. Give the decisive number, what it means, and at most one limitation. Use plain English and
+     no internal loop vocabulary. -->
 
 ## Motivation
-(Why this experiment? What belief is being tested? What would support vs contradict?)
 
-## Literature grounding
+<!-- Why does this question matter to the research goal? State the hypothesis and what was uncertain before. -->
 
-- **target belief status**: grounded
-- **review artifact**: `REPORTS/R###.md`
-- **design implications adopted**: (methods, controls, baselines, assets, or scope taken from the review)
-- **review recommendation not adopted**: (anything deliberately changed, with rationale)
+## Questions tested
 
-## Plan amendments
-
-<!-- Compare PLAN.initial.md with the final PLAN.md. State "None" if unchanged. -->
-| Version | Class | When | What changed | Why scope was preserved | Outcomes seen first? |
-|---------|-------|------|--------------|-------------------------|----------------------|
-| (vN) | (A/B) | (timestamp) | (before → after) | (scientific invariants retained) | (no, or exact data already seen) |
+<!-- One primary question. Add a secondary question only when it is required to interpret the primary result. -->
+1. **Primary:** (question with the support/contradict threshold)
+2. **Secondary, if needed:** (necessary mechanism, robustness, or alternative-explanation question; otherwise omit)
 
 ## Method
-(What was done, step by step — enough detail that a human could reproduce)
+
+- **approach:** (intervention and what stayed fixed)
+- **data:** (dataset, split, sample size, generation, seed policy)
+- **comparisons:** (treatment, baseline, and only necessary controls)
+- **metrics:** (primary metric and decision threshold)
+- **repetitions:** (number and aggregation)
+- **environment:** (model/checkpoint, software, hardware)
+- **parallel execution:** (confirmed GPU count, DDP/other layout, per-device/global batch or condition placement; if not DDP on multiple GPUs, give the exact reason)
+- **scientific changes during execution:** (only changes that affect interpretation; otherwise None)
+
+## Experiments
+
+<!-- List the coherent evidence package. The main comparison, repetitions, required controls, and any
+     verdict-changing ablations stay in this R###. Do not list setup or debugging as experiments. -->
+| Experiment | Why it is needed | Comparison / conditions |
+|------------|------------------|-------------------------|
+| Main test | Directly answers the primary question | (baseline vs treatment) |
+| (control or ablation, if needed) | (alternative it rules out) | (conditions) |
 
 ## Results
 
-### Data
-<!-- ALL key metrics inline. Do NOT just point to JSON files. -->
-| Metric | Value | Notes |
-|--------|-------|-------|
-| (metric) | (value) | (interpretation) |
+<!-- Put every number needed to judge the answer inline. Use one compact table where possible. A plot is optional
+     and limited to one only when it communicates the result better than the table. -->
+| Experiment / condition | Primary result | Uncertainty / repetitions | Meaning |
+|------------------------|----------------|---------------------------|---------|
+| (condition) | (number) | (spread / N) | (supports, contradicts, or inconclusive) |
 
-### Visualizations
-<!-- Generate plots for numerical results. Save EVERY plot to RUNS/(run ID)/artifacts/<filename> — never under REPORTS/. Embed below using `../RUNS/(run ID)/artifacts/...` (the `../` is required because this report lives in REPORTS/ and RUNS/ is its sibling). -->
-![description](../RUNS/(run ID)/artifacts/plot_name.png)
+- **wall-clock to answer:** (elapsed setup/queue/execution/analysis when available; always include launch-to-results time)
+- **GPU use, if applicable:** (N/N confirmed GPUs did useful work; per-rank samples/batches and throughput, plus peak memory or sampled utilization when already collected)
 
-### Analysis
-(Interpret the results. Why do they look this way? What patterns? What's surprising?)
+## Analysis
 
-### Predicted vs actual
-<!-- Compare against the plan's Predictions section. Surprises are signal. -->
-| Metric | Predicted | Actual | Surprise? |
-|--------|-----------|--------|-----------|
-| (metric) | (from plan) | (observed) | (yes/no — what does the gap mean?) |
+<!-- Answer each question directly. Explain why the comparison supports the conclusion, what necessary controls or
+     ablations showed, and any surprising result. Do not add a literature review or process narration. -->
 
-## Signal
-- **discrimination**: (discriminating | partial | null)
-- (why — what did we learn or fail to learn?)
-- (key observation)
+## Ablations (optional)
 
-## Verdict
-<!-- One of: supports | contradicts | unclear | BLOCKER -->
-**(verdict)** — belief #N: (how this evidence affects the belief)
+<!-- Include only when an ablation was necessary to decide the claim or rule out an explanation that could reverse
+     it. Keep all related ablations in this run. Delete this section when none was needed. -->
 
-## Confounds
-- (what else could explain the result?)
+## Limitations and tested scope
 
-## New hypotheses
-<!-- NEW belief to track? Include parent belief # if it depends on an existing one. -->
-<!-- Every new hypothesis enters STATE.md with Literature=pending and must receive its own review run. -->
-- (new hypothesis, with reasoning) [parent: #N or —]
+<!-- Exact model/data/runtime/hardware scope, plus only a limitation or alternative explanation that could reverse
+     the conclusion. Write "No material limitation identified within the tested scope" when appropriate. -->
 
-## Next tests
-1. (delta + why it would discriminate)
-2. (alternative direction)
-3. (wild card from unexpected observation)
+## Conclusion
 
-## Artifacts
-- `artifacts/(file)` — (description)
+- **answer:** (supports | contradicts | cannot decide) hypothesis/belief #N
+- **decisive evidence:** (one sentence with exact result)
+- **confidence:** (before → proposed after, with a short reason)
+- **next experiment:** (None if decided; otherwise at most one experiment needed to answer the same unresolved
+  question—not a new research direction)
+
+## Reproducibility
+
+- **command:** `(exact main command or job ID)`
+- **parallelism:** (launcher, world size, and global/per-device batch or condition-to-GPU assignment)
+- **metrics:** `../RUNS/(run ID)/metrics/(file)`
+- **artifacts:** `../RUNS/(run ID)/artifacts/(file)` (only useful artifacts)
 
 ## Meta
+
 - **run_id**: (R###)
-- **delta**: (what was tested)
 - **started**: (timestamp)
 - **completed**: (timestamp)
-- **status**: (completed | failed | blocked)
 - **execution**: (direct | slurm)
-- **slurm_job_id**: (job ID, if slurm)
-- **wandb_run**: (wandb run URL, if applicable)
+- **slurm_job_id**: (job ID, if applicable)
+- **wandb_run**: (URL, if applicable)

@@ -1,70 +1,61 @@
 # PLAN — R007
 
-## Delta
-- **what**: Fine-tune Llama-3-8B on instruction-tuning dataset with LoRA rank 16 vs rank 64 to measure accuracy-efficiency tradeoff
-- **intent**: Determine whether rank 64 provides meaningful quality improvement over rank 16, or whether rank 16 is sufficient
-- **target belief**: #3 — "LoRA rank 16 is sufficient for instruction-following quality on this dataset"
-- **type**: experiment
+## Question and finish line
 
-## Resources
-- **checkpoint**: /scratch/researcher/checkpoints/llama-3-8b-base
-- **dataset**: /data/nlp/instruction-tuning/alpaca_cleaned.json
-- **prior artifacts**: RUNS/R006/artifacts/lora_r16_results.json
-- **output dir**: RUNS/R007/artifacts/
-- **precision**: BF16
-- **parallelism**: DDP, 4 GPUs
-- **launch**: `torchrun --nproc_per_node=4`
-- **scratch path**: /scratch/researcher/
-- **execution mode**: slurm
+- **research goal:** Resolve the quality-efficiency choice between LoRA ranks 16 and 64.
+- **hypothesis:** #3 — rank 16 is sufficient for instruction-following quality on this dataset.
+- **primary question:** Does rank 64 improve quality enough to justify four times as many adapter parameters?
+- **support / contradict:** Rank-64 loss <1.75 or ROUGE-L >0.46 contradicts #3; otherwise supports it.
+- **minimum complete evidence:** Both ranks on the exact held-out split with the same evaluator, loss, ROUGE-L, throughput, and peak VRAM.
+- **answer produced:** Choose rank 16 or 64 for this dataset and training setup.
+- **ETA to answer:** 4 hours 15 minutes total: 15-minute expected queue plus at most 4 hours from launch to report; update the queue estimate at submission.
 
-## SLURM
-- **walltime**: 04:00:00
-- **gpus**: 4
-- **memory**: 128G
-- **partition**: gpu
+## Evidence package
 
-## Commands
+- **main comparison:** Train rank 64 and compare it with the exact R006 rank-16 checkpoint.
+- **repetitions / coverage:** One matched three-epoch training run per rank on the fixed split.
+- **required controls or ablations:** Same evaluator and data manifest; no extra ablation needed.
+- **first command:** `sbatch /home/researcher/llm-finetune/RUNS/R007/job.sh`
+- **outputs:** `RUNS/R007/metrics/`, `RUNS/R007/artifacts/`, `REPORTS/R007.md`
+- **technical lookup:** None.
 
-### Step 1: Prepare data splits
-Load alpaca_cleaned.json, split 90/10 train/eval. Tokenize with Llama-3 tokenizer, max_length=2048. Save processed dataset to scratch.
+## Method and resources
 
-### Step 2: Train LoRA rank 64
-Fine-tune llama-3-8b-base with LoRA rank=64, alpha=128, lr=2e-4, batch_size=8, 3 epochs. Use BF16, DDP across 4 GPUs. Save checkpoint and training logs.
+- **approach / data:** Fixed 90/10 processed Alpaca split; rank 64/alpha 128, 3 epochs, BF16, lr 2e-4, batch 8.
+- **metric:** Held-out loss, perplexity, ROUGE-L, throughput, peak VRAM, and training time.
+- **execution:** slurm
+- **paths:** `/scratch/researcher/checkpoints/llama-3-8b-base`; `/data/nlp/instruction-tuning/alpaca_cleaned.json`; `/scratch/researcher/checkpoints/R006/lora_r16`; `/scratch/researcher/R006/alpaca_processed`; `/home/researcher/llm-finetune/RUNS/R006/artifacts/dataset_manifest.json`; `/home/researcher/llm-finetune/RUNS/R006/artifacts/lora_r16_results.json`
+- **compute:** Human-confirmed 4×A100-80GB, BF16.
+- **parallel strategy:** Four-rank DDP because one model replica fits in 80 GB; tensor parallelism is not permitted for this run.
+- **utilization plan:** Each rank receives training/evaluation batches; per-device batch 8, global batch 32 before accumulation, with per-rank batch counts recorded.
+- **launch:** `torchrun --nproc_per_node=4 RUNS/R007/experiment.py`; partition `gpu`; walltime `04:00:00`; memory `128G`; 4 GPUs.
+- **expected wall-clock:** At most 4 hours from launch to complete metrics; optimize elapsed time rather than GPU-hours.
 
-### Step 3: Evaluate both ranks
-Run evaluation on eval split for both rank 16 (from R006) and rank 64 checkpoints. Compute: loss, perplexity, ROUGE-L on held-out instructions.
+## Prediction
 
-### Step 4: Compare and analyze
-Generate comparison plots: training curves, eval metrics side-by-side. Compute efficiency metrics (time, VRAM, throughput) for both ranks. Determine if rank 64 quality justifies 4x parameter increase.
+- **expected:** Rank 64 reaches loss 1.76 and ROUGE-L 0.45, not enough to justify the larger adapter.
+- **surprising:** Crossing neither quality threshold would show rank is not the expected bottleneck.
 
-### Final step: Write report
-Write report to REPORTS/R007.md following the report template.
-Include all data inline, generate visualizations, embed plots with ![](path).
+## Bounds
 
-## Success metrics
-| Metric | Baseline | Target | How to measure |
-|--------|----------|--------|----------------|
-| eval_loss | 1.82 (R006 rank 16) | < 1.75 to support rank 64 | cross-entropy on eval split |
-| ROUGE-L | 0.42 (R006 rank 16) | > 0.46 to support rank 64 | ROUGE-L on instruction responses |
-| throughput | 1850 tok/s (R006) | within 20% | tokens per second during training |
+- **time budget:** 240 minutes.
+- **finish:** Complete the evidence package; report once it supports, contradicts, or cannot decide the claim.
+- **stop:** Missing exact checkpoint/split/baseline, non-finite loss, exhausted OOM repair, or timeout.
+- **adapt freely:** Change scripts, paths, batching, compute, and analysis without approval; use a fresh job after partial-DDP failure.
+- **integrity:** Preserve raw outcomes and mark outcome-driven scientific changes exploratory.
 
-## Stop conditions
-- BLOCKER if: checkpoint /scratch/researcher/checkpoints/llama-3-8b-base not found
-- BLOCKER if: GPU OOM with batch_size=8 (try reducing to 4 before reporting)
-- TIMEOUT after: 240 minutes
+## Smoke test (optional)
 
-## Context
+- **risk tested:** DDP/env/data loading and batch-8 VRAM before the costly main experiment; maximum 15 minutes.
+- **command:** Submit the four-GPU smoke job for one forward/backward/optimizer step.
+- **continue when:** Every rank has finite loss, peak VRAM ≤72 GB, and projected main time ≤180 minutes.
 
-**Relevant beliefs:**
-- Belief #3 (confidence 0.5): "LoRA rank 16 is sufficient for instruction-following quality" — R006 showed rank 16 achieves eval_loss=1.82, ROUGE-L=0.42
-- Belief #1 (confidence 0.7): "Instruction-tuning improves base model performance" — supported by R003-R005
+## Working notes
 
-**Prior findings:**
-- R006: LoRA rank 16 trained in 47 min on 4x A100, peak VRAM 62GB/GPU, eval_loss=1.82, ROUGE-L=0.42
-- R005: Full fine-tune achieves eval_loss=1.65 but requires FSDP and 3x training time
+None.
 
 ## Meta
-- **run_id**: R007
-- **created**: 2026-04-12
-- **time_budget**: 240 minutes
-- **status**: planned
+
+- **run_id:** R007
+- **created:** 2026-04-12
+- **status:** working

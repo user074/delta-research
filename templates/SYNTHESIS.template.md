@@ -1,31 +1,36 @@
-# SYNTHESIS — (project name)
+# RESEARCH SUMMARY — (project name)
 
-> Living summary of what we know. Updated after major belief changes or every 5 runs.
-> For structured state, see STATE.md.
+> Write for a technical colleague who has not followed the work. Give the answer first, use exact numbers, define
+> unfamiliar terms on first use, and keep internal loop vocabulary out of the explanation.
 
-## Current understanding
-<!-- Narrative summary of supported beliefs and implications. -->
-<!-- Write for a researcher who hasn't followed the loop. -->
+## Answer so far
 
-## Key findings
-<!-- Most important results, ordered by significance. Reference run IDs. -->
-1. **(finding)** — (meaning, belief resolved, run reference)
+<!-- At most 120 words. First sentence: what the evidence supports, contradicts, or cannot yet decide. Then give
+     the decisive evidence, tested scope, and only the limitation most likely to change the answer. -->
 
-## What changed recently
-<!-- Last paradigm shift or major belief updates. -->
-- **Paradigm v(N)** (date): (what shifted and why)
-- Recent: (last 2-3 belief changes)
+## Best evidence
 
-## Open questions
-<!-- Active beliefs with confidence 0.3-0.7. -->
-1. **(question)** — confidence (X), next test: (frontier delta)
+<!-- Order by importance, not run number. Use plain descriptions instead of internal belief/frontier language. -->
+| Question | Measured result | What it means | Tested scope | Source |
+|----------|-----------------|---------------|--------------|--------|
+| (plain-English question) | (exact number/comparison) | (one-sentence answer) | (model/data/runtime/hardware) | [R###](REPORTS/R###.md) |
 
-## Where we're heading
-<!-- Strategic direction. What's the frontier aiming at? -->
+## What could change this answer
+
+<!-- Only concrete limitations or alternative explanations that could reverse the current answer. Write
+     "Nothing material identified" when appropriate. -->
+
+## Next step, only if needed
+
+<!-- At most one direct experiment for an unresolved part of the user's question. If decided, write:
+     "None — the stated hypothesis is decided in the tested scope." -->
+
+## Technical details
+
+<!-- Exact model/checkpoint, dataset, metric, sample size, runtime, hardware, and command only when useful for
+     reproducing or judging the result. Do not turn this into a process narrative. -->
 
 ## Meta
 - **project**: (name)
-- **paradigm**: v(N)
-- **total_runs**: (N)
-- **last_updated**: (date)
-- **coverage**: (resolved vs active beliefs)
+- **total experiments**: (N)
+- **last updated**: (date)

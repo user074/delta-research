@@ -1,23 +1,17 @@
-# LITERATURE INDEX — (project name)
+# OPTIONAL LITERATURE INDEX — (project name)
 
-> Durable registry of per-belief literature grounding. Full versioned reviews live under
-> `LITERATURE/B###/R###/`; the corresponding `REPORTS/R###.md` is an immutable byte-identical run snapshot.
+> Human-requested briefs or one-shot direction-recovery briefs only. Autonomous recovery is allowed only after
+> direct work fails and project evidence yields no direction. These references do not gate experiments, consume
+> R### run IDs, enter the Ledger, or update belief confidence.
 
-| Belief | Exact hypothesis | Literature status | Latest review | Reviewed on | Evidence verdict | Direction | Archive | Run report |
-|--------|------------------|-------------------|---------------|-------------|------------------|-----------|---------|------------|
-| #1 | (exact BeliefState wording) | pending | — | — | — | — | — | — |
+| Brief | Belief | Exact hypothesis | Reviewed on | Evidence summary | Direction | Archive |
+|-------|--------|------------------|-------------|------------------|-----------|---------|
+| L001 | #1 | (exact BeliefState wording) | (date) | (one-line summary) | (keep/narrow/reframe/drop) | `LITERATURE/B001/L001/` |
 
 ## Archive contract
 
-Each completed literature-review run writes:
-
-```text
-LITERATURE/B###/R###/
-├── REVIEW.md       # full review; byte-identical to REPORTS/R###.md
-├── queries.md      # exact search log, databases, dates, inclusion/exclusion notes
-├── evidence.csv    # one row per included source/claim with relationship and limitations
-└── sources.bib     # BibTeX when available; otherwise a complete linked source list
-```
-
-Reviews are immutable. A refresh creates a new `R###/` directory under the same belief and updates the index to
-the latest review; it never overwrites an earlier review.
+An optional brief may preserve `REVIEW.md`, `queries.md`, `evidence.csv`, and `sources.bib` under
+`LITERATURE/B###/L###/`. Briefs are immutable reference material. The loop may cite them in `PLAN.md` when they
+change an experiment design, but their presence or absence never determines eligibility. Autonomous recovery is
+limited to one brief between direct observations; if it yields no direct experiment, stop at AMBIGUITY rather than
+opening another search.
