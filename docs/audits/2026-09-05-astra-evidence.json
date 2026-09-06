@@ -1,0 +1,49 @@
+{
+  "date": "2026-09-05",
+  "audited_commit": "bb7f09c381167f4d5885fbd9c634b38cdd76ba5f",
+  "codex_cli_version": "0.150.1",
+  "baseline": {
+    "command": "python3 tests/run_tests.py",
+    "passed": 192,
+    "total": 192,
+    "exit_code": 0
+  },
+  "method": "Temporary fake codex exits 42; fake squeue lists job 12345. Monitor uses synthetic local logs. Logger extracted from the first Python block in OBSERVABILITY.md. Pipeline executed in a clean Bash shell. No live model or SLURM job.",
+  "probes": [
+    {
+      "case": "generation_failure",
+      "exit_code": 0,
+      "relevant_output": [
+        "Agent exited with code 42",
+        "  TOTAL: 21/21 passed  (\u001b[32mall passed\u001b[0m)"
+      ]
+    },
+    {
+      "case": "review_failure",
+      "exit_code": 0,
+      "relevant_output": [
+        "Review agent exited with code 42",
+        "  TOTAL: 21/21 passed  (\u001b[32mall passed\u001b[0m)"
+      ]
+    },
+    {
+      "case": "chatty_timeout",
+      "requested_timeout_seconds": 1,
+      "elapsed_seconds": 3.12,
+      "exit_code": 0,
+      "output": "[WAIT] Watching job 12345 \u2014 waiting for /var/folders/xt/jh580gc93cg89d2ns6_5gvc80000gn/T/delta-astra-audit-amf7b97n/chatty.out...\n[WAIT] Output file appeared \u2014 streaming DELTA markers...\n[DELTA-DONE] R001 | elapsed=3s | status=completed\n[WAIT] Job 12345 finished | status=DONE"
+    },
+    {
+      "case": "done_before_blocker",
+      "exit_code": 0,
+      "output": "[WAIT] Watching job 12345 \u2014 waiting for /var/folders/xt/jh580gc93cg89d2ns6_5gvc80000gn/T/delta-astra-audit-amf7b97n/late_failure.out...\n[WAIT] Output file appeared \u2014 streaming DELTA markers...\n[DELTA-DONE] R001 | status=completed\n[WAIT] Job 12345 finished | status=DONE"
+    }
+  ],
+  "helper_and_pipeline": {
+    "has_log_results": true,
+    "has_log_eval": false,
+    "close": "AttributeError: 'ExperimentLogger' object has no attribute 'train_log'",
+    "direct_pipeline_exit_code": 0,
+    "direct_pipeline_output": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nRuntimeError: audit simulated failure"
+  }
+}

@@ -15,6 +15,11 @@
 
 ## Environment
 <!-- Managed by environment agent. Workers read this; detailed hardware guidance lives in INFRA.md. -->
+- **framework instructions**: v2 (`templates/AGENTS.fragment.md`)
+- **supervisor model / effort**: gpt-6-astra / high (or explicit user override)
+- **worker model / effort**: gpt-5.6-sol / medium (explicit for all subagents)
+- **runtime journal**: `.delta-runtime/journal.json` (operational state; see RUNTIME.md)
+- **framework root**: (absolute installed delta-research path)
 - **env manager**: (conda | mamba | uv | venv | pixi | poetry | other)
 - **env activation**: (exact activation command)
 - **python**: (version)
@@ -63,6 +68,7 @@
 - `BLOCKER`: worker hits a real unavailable-resource, safety, or execution blocker
 - `AMBIGUITY`: frontier empty and regeneration fails
 - `IRREVERSIBLE`: irreversible action needs human approval
+- `POLICY`: active Delta Loop or host policy requires a stop
 
 ### Constraints
 - One completed R### answers one coherent hypothesis question; substantial means decision-complete, not artificially large

@@ -34,11 +34,16 @@ flowchart LR
 
 ## Recent updates
 
+- **Cheaper workers** — Astra supervises; Sol/medium executes with compact handoffs
+- **Durable recovery** — project ownership, cumulative deadline, per-attempt job records, and pending publication
+- **Failure-aware tests** — fresh output directories, explicit models, observable usage, and review failures that fail the command
+- **Reliable execution** — scheduler-confirmed completion, enforced monitor deadlines, direct process status, and buffered telemetry
+
 - **SLURM support** — generate `experiment.py` + `job.sh`, submit, monitor
 - **wandb integration** — live metrics + optional requested Reports
 - **Observability framework** — DELTA markers, dense logs, run directories
 - **INFRA profile** — hardware + cluster config + optimization playbook
-- **Smoke tests** — fast-queue dry run before hero run
+- **Optional smoke tests** — a bounded dry run for a concrete execution risk, within the same experiment
 - **Cluster probe + interview** — partitions, storage policy, fairshare
 - **Persistent CLAUDE.md/AGENTS.md rules** — loop discipline survives compaction
 - **Predictions in plans** — predicted vs actual in reports. Good for your brain's on-policy learning!
@@ -96,7 +101,10 @@ Run the research loop
 
 The loop runs autonomously until it hits a budget, blocker, or asks you something. Read `SYNTHESIS.md` whenever you want to check in.
 
-> **Codex users:** enable multi-agent once with `codex features enable multi_agent`. Then `codex --approve-for-me` from the project root.
+> **Codex users:** initialization installs project configuration for an Astra supervisor
+> and Sol workers at medium effort. See `templates/codex.config.toml` and
+> `templates/research-worker.toml`. Existing user overrides are preserved. Start with
+> `codex --approve-for-me` from the project root.
 
 ---
 
@@ -211,7 +219,7 @@ The framework is cluster-aware out of the box. On SLURM:
 
 - **Init interviews you** about partitions, storage policy (`/mnt/home` vs `/mnt/lustre` matters — defaults are wrong on most clusters), accounts, QOS, fairshare conventions
 - **Validates with a test job** before committing to real runs (env activation, GPU access, NCCL, dataset paths mounted on compute nodes)
-- **Workers generate self-contained `experiment.py` + `job.sh`**, submit via `sbatch`, monitor via `scripts/wait_for_job.sh` (FIFO-based, no polling)
+- **Workers generate self-contained `experiment.py` + `job.sh`**, submit via `sbatch`, monitor via `scripts/wait_for_job.sh` (bounded log reads, deadline checks, and scheduler-confirmed completion)
 - **DELTA marker protocol** for sparse automation signals; full logs to `RUNS/R###/logs/`; live metrics to wandb
 - **All paths are absolute**, anchored to a project-root field in `INFRA.md` so jobs work regardless of compute-node CWD
 
@@ -222,7 +230,7 @@ See `templates/OBSERVABILITY.md` for the full execution workflow and `templates/
 ## Works with
 
 - **Claude Code** — `claude` CLI, uses Task tool for worker spawning
-- **OpenAI Codex** — `codex --approve-for-me`, requires `codex features enable multi_agent`
+- **OpenAI Codex** — `codex --approve-for-me`, with explicit project supervisor/worker models
 - **Cursor** and any other agent that reads markdown and runs commands
 
 ---
@@ -233,6 +241,10 @@ See `templates/OBSERVABILITY.md` for the full execution workflow and `templates/
 delta-research/
 ├── templates/
 │   ├── INIT.md              # First-time setup (interview, env, hardware, SLURM)
+│   ├── AGENTS.fragment.md   # Compact versioned instructions for installed projects
+│   ├── RUNTIME.md           # Ownership, deadlines, attempts, crash/publication recovery
+│   ├── codex.config.toml    # Astra supervisor, Sol subagent defaults
+│   ├── research-worker.toml # Explicit Sol worker configuration
 │   ├── SUPERVISOR.md        # The 7-phase loop spec, worker prompt template
 │   ├── OBSERVABILITY.md     # DELTA markers, run logging, SLURM workflow
 │   ├── WANDB_REPORTS.md     # wandb Report sub-agent spec
@@ -245,9 +257,14 @@ delta-research/
 │   ├── LITERATURE_INDEX.template.md  # Optional bounded-review registry
 │   └── SYNTHESIS.template.md
 ├── scripts/
-│   └── wait_for_job.sh      # Universal SLURM monitor (FIFO + 30s safety net)
+│   ├── wait_for_job.sh      # Compatible entry point to the Python SLURM monitor
+│   ├── wait_for_job.py      # Deadline + scheduler exit status + markers
+│   ├── run_command.py       # Direct process deadline, status and logs
+│   ├── loop_runtime.py      # Atomic operational journal and supervisor ownership
+│   └── experiment_logger.py # Buffered JSONL telemetry and atomic final metrics
 └── tests/
-    └── run_tests.py         # Structural + LLM-review tests for all artifacts
+    ├── run_tests.py         # Fixture validation + isolated model evaluations
+    └── test_reliability.py  # Local behavioral regression tests
 ```
 
 ---
@@ -258,8 +275,8 @@ delta-research/
 # Validate existing outputs (no agent, fast)
 python tests/run_tests.py
 
-# Generate outputs by running the agent, then validate
-python tests/run_tests.py --run
+# Generate fresh outputs with explicit Astra/Sol routing, then validate
+python tests/run_tests.py --run --agent codex
 
 # LLM review — agent evaluates output quality against templates
 python tests/run_tests.py --run --review
@@ -268,11 +285,28 @@ python tests/run_tests.py --run --review
 python tests/run_tests.py --run --test plan
 python tests/run_tests.py --run --test slurm
 
-# Use Codex instead of Claude
-python tests/run_tests.py --run --agent codex
+# Use Claude/Sonnet explicitly
+python tests/run_tests.py --run --agent claude
+
+# Reliability regressions: no model, GPU, or external services
+python -m unittest discover -s tests -p 'test_*.py'
 ```
 
-After editing templates, re-run `--run --review` to verify the agent follows the updated rules.
+Run local regression and fixture checks first. Model evaluations are explicit, usage-consuming
+runs: `--run` writes to a new `tests/evaluations/eval-*` workspace without checked-in answers.
+Failed generation, timeout, missing outputs, protected-input changes or a failed review
+make the test command fail. `--review` alone reviews a snapshot of existing examples.
+Each invocation records model/effort, CLI version, prompt, output hashes, JSONL events,
+available token usage and errors. Use `--output-dir NEW_PATH` to name the workspace, or
+`--artifacts-dir PATH/tests` to validate a prior evaluation. No scientific conclusion or
+cost improvement is established by the structural checks alone.
+
+Default evaluation roles are Astra/high for planning and compression, Sol/medium for
+execution/setup and reviews. Override with `--supervisor-model`, `--worker-model`,
+`--review-model`, `--supervisor-effort`, or `--worker-effort`. `--model` overrides every
+role for a controlled comparison. Measure total cost per valid experiment, including
+retries and supervisor work. Use compact fresh worker handoffs, concise returns, and
+scripts for waiting/aggregation. Extra agents are not free token savings.
 
 ---
 
@@ -283,7 +317,12 @@ cd your-project/delta-research
 git pull
 ```
 
-Existing `STATE.md`, `INFRA.md`, `SYNTHESIS.md`, `REPORTS/`, `LITERATURE/`, and `RUNS/` are untouched — they live in your project root, not in `delta-research/`.
+Existing research artifacts live in the project root and are preserved. Refresh the
+managed `AGENTS.fragment.md` block and reconcile worker-model configuration using INIT.md;
+a Git pull does not refresh previously generated instructions. For old unmarked files,
+preserve project-specific instructions and replace only obsolete framework rules. Use
+RUNTIME.md to adopt pending work before starting another run. Do not edit generated
+`.delta-loop/LOOP.md` or `.delta-loop/POLICY.md`.
 
 ---
 

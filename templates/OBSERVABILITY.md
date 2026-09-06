@@ -35,7 +35,7 @@ RUNS/R###/
   copy, versioning, amendment classes, or approval workflow. Mechanical changes need no note. If results were
   already visible before a material scientific change, append one transparent Working note and treat affected
   results as exploratory.
-- **logs/** — Dense, append-only text files. One line per step or event. For humans to analyze what happened in detail. Name files by purpose (e.g. `train.log` for training, `benchmark.log` for benchmarks, `analysis.log` for data analysis).
+- **logs/** — Dense, append-only text files. One line per selected log interval or event. For humans to analyze what happened in detail. Name files by purpose (e.g. `train.log` for training, `benchmark.log` for benchmarks, `analysis.log` for data analysis).
 - **metrics/** — Structured JSON. Machine-readable, used by the report generator and wandb sync. Name files by phase (e.g. `results.json`, `training_history.json`, `scores.json`).
 - **checkpoints/** — Large model weights and optimizer states. Separate from `artifacts/` so the whole tree can be gitignored (`RUNS/*/checkpoints/`). On clusters, this directory may be a symlink to a scratch path from INFRA.md (e.g. `/scratch/$USER/{RUN_ID}/`) — the report still references `checkpoints/<file>` regardless.
 - **artifacts/** — Small outputs that the report references: plots, generated samples, processed data summaries. NOT model weights — those go in `checkpoints/`. No scripts, no logs.
@@ -53,11 +53,13 @@ RUNS/*/wandb/
 
 ## Full Logging (for analysis)
 
-Full logs capture everything — every step, every metric, every warning. They exist for humans and for the report generator to extract detailed data.
+Logs preserve decision-relevant measurements and diagnostic events. Choose a logging interval
+that avoids GPU synchronization and network filesystem writes on every training step.
+Store full per-example results only when the scientific comparison needs them.
 
 ### Log format
 
-One line per step/event, tab-separated for easy parsing. Name the log file after what it captures.
+One line per recorded interval/event, tab-separated for easy parsing. Name the log file after what it captures.
 
 **Training example** (`logs/train.log`):
 ```
@@ -98,56 +100,26 @@ Structured JSON in `metrics/`. Name files by phase. One file per distinct output
 
 ### Python logging helper
 
+Use the tested `scripts/experiment_logger.py` helper. Do not regenerate it in every
+experiment. Add the framework scripts directory to the import path using the absolute
+framework root from INFRA.md. Each rank/attempt uses its own log directory.
+
 ```python
-import json
-import os
-from datetime import datetime, timezone
+import sys
+sys.path.insert(0, f"{FRAMEWORK_ROOT}/scripts")
+from experiment_logger import ExperimentLogger
 
-class ExperimentLogger:
-    """Full experiment logger — writes dense logs and structured metrics.
-
-    This is a reference implementation. Workers can adapt it to their needs.
-    For very long jobs (100K+ steps), consider writing metrics JSON
-    incrementally instead of accumulating in memory.
-    """
-
-    def __init__(self, run_dir, log_name="experiment.log"):
-        self.log_dir = os.path.join(run_dir, "logs")
-        self.metrics_dir = os.path.join(run_dir, "metrics")
-        os.makedirs(self.log_dir, exist_ok=True)
-        os.makedirs(self.metrics_dir, exist_ok=True)
-
-        self.log_file = open(os.path.join(self.log_dir, log_name), "w")
-        self.history_path = os.path.join(self.metrics_dir, "history.json")
-        self.history = []
-        self._flush_interval = 1000  # Write JSON every N steps
-
-    def log_step(self, **kwargs):
-        """Log a single step to the text log and accumulate for JSON."""
-        kwargs.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
-        line = "\t".join(f"{k}={v}" for k, v in kwargs.items())
-        self.log_file.write(line + "\n")
-        self.log_file.flush()
-        self.history.append(kwargs)
-        # Periodic JSON flush to avoid unbounded memory growth
-        if len(self.history) % self._flush_interval == 0:
-            self.save_history()
-
-    def log_results(self, results: dict, name="results.json"):
-        """Write a results JSON file."""
-        path = os.path.join(self.metrics_dir, name)
-        with open(path, "w") as f:
-            json.dump(results, f, indent=2)
-
-    def save_history(self):
-        """Write accumulated step history to JSON."""
-        with open(self.history_path, "w") as f:
-            json.dump(self.history, f, indent=2)
-
-    def close(self):
-        self.save_history()
-        self.train_log.close()
+with ExperimentLogger(RUN_DIR, flush_interval=100) as logger:
+    # Aggregate detached metrics on GPU; convert to host values only at log time.
+    logger.log_step(step=100, loss=0.42)
+    logger.log_results({"metric": 0.42, "sample_count": 128})
 ```
+
+The helper appends buffered `logs/experiment.log` and `metrics/history.jsonl` rows,
+flushes at the chosen interval and on close, and atomically replaces final JSON results.
+It does not keep a full history in memory or rewrite it every thousand steps. It is safe
+to close repeatedly and preserves the original exception if cleanup also fails. Import
+and use it in the real experiment; no separate logging audit or research run is needed.
 
 ---
 
@@ -183,10 +155,15 @@ DELTA markers are the sparse signaling channel. The monitoring script (`scripts/
 
 ### Terminal markers
 
-The monitoring script exits when it sees one of these:
-- `[DELTA-SMOKE-DONE]` → exit 0 (smoke success; continue to the main experiment, no report/state update)
-- `[DELTA-DONE]` → exit 0 (the monitored process succeeded)
+The SLURM monitor combines these markers with scheduler state:
+- `[DELTA-SMOKE-DONE]` plus `COMPLETED` and exit `0:0` → exit 0 (continue to the main experiment, no report/state update)
+- `[DELTA-DONE]` plus `COMPLETED` and exit `0:0` → exit 0 (the monitored process succeeded)
 - `[DELTA-BLOCKER]` → exit 1 (fatal failure)
+
+It drains final output before accepting success. Scheduler failure overrides success
+markers. Monitoring timeout or unavailable accounting never permits blind resubmission;
+the job may still be running. Direct execution uses the process exit status recorded by
+`scripts/run_command.py`.
 
 `[DELTA-ERROR]` is **recoverable** — printed to the agent but does not terminate monitoring. Use it for non-fatal exceptions (e.g., one eval batch failed but training continues). Use `[DELTA-BLOCKER]` for truly fatal errors.
 
@@ -244,11 +221,13 @@ def delta_blocker(message):
 ### Usage — both layers together
 
 ```python
+import os
 import time
 
 PROJECT_ROOT = "/home/researcher/llm-finetune"  # From INFRA.md project root
 RUN_DIR = os.path.join(PROJECT_ROOT, "RUNS/R007")
 logger = ExperimentLogger(RUN_DIR)  # Full logs
+start_time = time.monotonic()       # Include setup in launch-to-result time
 delta_start()                        # Automation signal
 
 try:
@@ -268,35 +247,34 @@ try:
             global_step = epoch * len(dataloader) + step
             pct = int(100 * global_step / total_steps)
 
-            # Full log — EVERY step (dense, for analysis)
-            logger.log_step(
-                step=global_step, epoch=epoch,
-                loss=f"{loss:.4f}", lr=f"{lr:.2e}",
-            )
+            # Convert detached aggregates to host scalars only at log time.
+            if global_step % log_interval == 0:
+                loss_val = float(loss.detach())
+                logger.log_step(step=global_step, epoch=epoch, loss=loss_val, lr=lr)
+                delta_metric(loss=f"{loss_val:.4f}", step=global_step, lr=f"{lr:.2e}")
 
             # DELTA progress — milestones only (sparse, for automation)
             if pct in (10, 25, 50, 75, 90) and pct > last_reported_pct:
-                delta_progress(pct, f"epoch {epoch} step {step} loss={loss:.4f}")
+                delta_progress(pct, f"epoch {epoch} step {step}")
                 last_reported_pct = pct
-
-            # DELTA metric — at log interval (sparse, for automation)
-            if global_step % log_interval == 0:
-                delta_metric(loss=f"{loss:.4f}", step=global_step, lr=f"{lr:.2e}")
 
     # --- Evaluation ---
     delta_progress(95, "running evaluation")
     eval_metrics = evaluate(model, eval_dataset)
-    logger.log_eval(eval_metrics)     # Full results to JSON
+    logger.log_results(eval_metrics)     # Full results to JSON
     delta_metric(**{k: f"{v:.4f}" for k, v in eval_metrics.items()})
 
     # --- Save ---
     save_checkpoint(model)
     logger.close()
-    elapsed = time.time() - start_time
+    elapsed = time.monotonic() - start_time
     delta_done(f"{elapsed:.1f}s")
 
 except Exception as e:
-    logger.close()
+    try:
+        logger.close()
+    except Exception:
+        pass  # Preserve the original failure.
     delta_blocker(str(e))
 ```
 
@@ -305,7 +283,7 @@ except Exception as e:
 | Aspect | Full logs (`logs/` + `metrics/`) | DELTA markers (stdout) |
 |--------|----------------------------------|----------------------|
 | Audience | Humans, report generator | Monitoring script, agent |
-| Density | Every step | 5-10 signals per run |
+| Density | At log interval | 5-10 signals per run |
 | Format | Tab-separated text + JSON | `[DELTA-*]` prefixed lines |
 | Purpose | Analyze training dynamics | Know when to continue the loop |
 | Storage | `RUNS/R###/logs/`, `RUNS/R###/metrics/` | SLURM stdout or terminal |
@@ -321,10 +299,10 @@ import wandb
 
 wandb.init(project=WANDB_PROJECT, name=RUN_ID, config=config)
 
-# In training loop — all three channels:
-logger.log_step(step=global_step, loss=loss_val, lr=lr)   # Full local log
-wandb.log({"loss": loss_val, "lr": lr}, step=global_step)  # wandb dashboard
+# In training loop — all three channels at the chosen log interval:
 if global_step % log_interval == 0:
+    logger.log_step(step=global_step, loss=loss_val, lr=lr)   # Full local log
+    wandb.log({"loss": loss_val, "lr": lr}, step=global_step)  # wandb dashboard
     delta_metric(loss=f"{loss_val:.4f}", step=global_step)  # Sparse automation
 
 # At the end:
@@ -337,8 +315,8 @@ The three channels serve different audiences:
 
 | Channel | Audience | Density | Where |
 |---------|----------|---------|-------|
-| Full logs | Humans, report generator | Every step | `RUNS/R###/logs/` + `metrics/` |
-| wandb | Humans, wandb Report sub-agent | Every step | wandb dashboard |
+| Full logs | Humans, report generator | At log interval | `RUNS/R###/logs/` + `metrics/` |
+| wandb | Humans, wandb Report sub-agent | At log interval | wandb dashboard |
 | DELTA markers | Monitoring script, agent | 5-10 per run | stdout |
 
 All three should be emitted when wandb is enabled. Full logs + DELTA markers are always required regardless of wandb mode.
@@ -348,6 +326,9 @@ All three should be emitted when wandb is enabled. Full logs + DELTA markers are
 ## Execution Workflow
 
 INFRA.md → Job Execution → `mode` selects the workflow: `direct` (agent runs `experiment.py` itself) or `slurm` (agent submits to a scheduler). Both modes share the DELTA markers, `ExperimentLogger`, run directory structure, and wandb integration above — only the launch and monitoring plumbing differ.
+
+Apply `templates/RUNTIME.md` to every launch below: reserve an attempt, attach its
+job/process ID, preserve unique logs, and reconcile termination before any retry.
 
 ---
 
@@ -364,8 +345,8 @@ The smoke test is a setup step inside the same R### as the main experiment. A pa
 `REPORTS/R###.md`, enter the Ledger, update beliefs, or complete the run; continue immediately to the main command.
 
 **Procedure:**
-1. Generate `experiment_smoke.py` — same code as `experiment.py`, parameterized for the smoke config (small dataset slice, few steps, small batch, 1 GPU)
-2. Run and capture: `python {PROJECT_ROOT}/RUNS/{RUN_ID}/experiment_smoke.py 2>&1 | tee {PROJECT_ROOT}/RUNS/{RUN_ID}/logs/smoke.out`
+1. Generate `experiment_smoke.py` — same code as `experiment.py`, parameterized for the smoke config (small dataset slice, few steps, short duration, all confirmed GPUs with the main job's process layout)
+2. Run with `scripts/run_command.py` as below, using unique smoke log/status paths and its bounded timeout.
 3. Extract throughput, peak VRAM (e.g. `nvidia-smi --query-gpu=memory.used --format=csv` during the run), time per step
 4. Compare against the plan's single `continue when` condition; adapt the working plan/code directly if needed
 5. On success, immediately run the measurement. If the probe cannot resolve its named risk within its cap, stop
@@ -393,23 +374,23 @@ Direct mode typically uses `WANDB_MODE=online` (local dev box has internet). Use
 
 #### Step 2 — Run and monitor
 
-Foreground (default — agent sees DELTA markers live):
+Use the tested direct launcher with an attempt-specific output path and the smaller
+of the run timeout and remaining cumulative budget:
 
 ```bash
-mkdir -p {PROJECT_ROOT}/RUNS/{RUN_ID}/logs
-python {PROJECT_ROOT}/RUNS/{RUN_ID}/experiment.py 2>&1 | tee {PROJECT_ROOT}/RUNS/{RUN_ID}/logs/run.out
+python3 {FRAMEWORK_ROOT}/scripts/run_command.py \
+  --log {PROJECT_ROOT}/RUNS/{RUN_ID}/logs/A001.out \
+  --status {PROJECT_ROOT}/RUNS/{RUN_ID}/A001.status.json \
+  --timeout {REMAINING_SECONDS} -- \
+  python {PROJECT_ROOT}/RUNS/{RUN_ID}/experiment.py
 ```
 
-There's no `wait_for_job.sh` — the foreground pipe blocks until the process exits. Exit code is the Python process's: 0 after `delta_done()`, 1 after `delta_blocker()` (which calls `sys.exit(1)`).
-
-Background (for long runs the agent shouldn't block on):
-
-```bash
-nohup python {PROJECT_ROOT}/RUNS/{RUN_ID}/experiment.py > {PROJECT_ROOT}/RUNS/{RUN_ID}/logs/run.out 2>&1 &
-echo $! > {PROJECT_ROOT}/RUNS/{RUN_ID}/run.pid
-# Poll for terminal markers:
-tail -f {PROJECT_ROOT}/RUNS/{RUN_ID}/logs/run.out | grep --line-buffered -E '\[DELTA-(DONE|BLOCKER)\]'
-```
+The launcher preserves the process exit code, records the PID/status and elapsed time,
+and terminates the process group on timeout. Use the host's asynchronous shell session
+and wait facility for long jobs; read the status file on resume. Do not start an endless
+`tail -f | grep` pipeline. Do not rerun a still-active process. If manually piping output
+through `tee`, explicitly use `set -o pipefail` and preserve the experiment exit status.
+See `templates/RUNTIME.md` for reservation and recovery after a launch interruption.
 
 When wandb is enabled, share the run URL with the human at submission time — that's the primary live dashboard, same as SLURM mode.
 
@@ -426,7 +407,8 @@ When wandb is enabled, share the run URL with the human at submission time — t
 If the process exits non-zero (DELTA-BLOCKER or unhandled exception):
 1. Read `logs/run.out` and `logs/stderr.log` to diagnose
 2. Common fixes: OOM → reduce batch / enable gradient checkpointing; missing dependency → `pip install`; CUDA error → check GPU is visible (`nvidia-smi`) and not held by another process; env mismatch → re-validate against INFRA.md `validated env activation`
-3. Apply the fix to `experiment.py`, re-run. Iterate up to 2-3 times.
+3. Verify the recorded process has stopped before retrying. Preserve its log/status files;
+   use a new attempt ID in the same R###. Apply the fix and retry up to 2-3 times within budget.
 4. Only escalate to BLOCKER if the failure is structural — wrong assumption in the plan, missing data, or environment issue requiring human action. Write `RUNS/{RUN_ID}/BLOCKER.md` using `templates/BLOCKER.template.md`; do not write a research report, append the Ledger, increment the run count, or allocate a new ID.
 
 Recovery happens *inside the run*. If it succeeds, the supervisor sees one report covering the complete outcome.
@@ -446,9 +428,9 @@ Smoke and hero are one research run. A completed smoke job is not research evide
 state compression, publication, or a new R###. Continue to the main job under the same plan and run ID.
 
 **Procedure:**
-1. Generate `experiment_smoke.py` — same code as `experiment.py`, but parameterized for the smoke config (small dataset slice, few steps, small batch, 1 GPU)
+1. Generate `experiment_smoke.py` — same code as `experiment.py`, but parameterized for the smoke config (small dataset slice, few steps, short duration, all confirmed GPUs with the main job's process layout)
 2. Generate `job_smoke.sh` — same env activation, but with the smoke walltime, GPUs, and the fast-queue partition (from INFRA.md → Cluster → Partitions, if one exists)
-3. Submit and wait: `JOB_ID=$(sbatch --parsable {PROJECT_ROOT}/RUNS/{RUN_ID}/job_smoke.sh)` then `bash scripts/wait_for_job.sh ${JOB_ID} {PROJECT_ROOT}/RUNS/{RUN_ID}/slurm-smoke-${JOB_ID}.out`
+3. Submit and wait: `JOB_ID=$(sbatch --parsable {PROJECT_ROOT}/RUNS/{RUN_ID}/job_smoke.sh)` then `bash {FRAMEWORK_ROOT}/scripts/wait_for_job.sh ${JOB_ID} {PROJECT_ROOT}/RUNS/{RUN_ID}/slurm-smoke-${JOB_ID}.out {REMAINING_SECONDS}`
 4. Read the smoke output to extract: throughput (steps/sec or tokens/sec), peak VRAM, time per step
 5. Compare against the plan's single `continue when` condition. Edit the working plan/scripts directly when the
    result requires a path, batch, precision, resource, or walltime change.
@@ -481,7 +463,7 @@ Write `RUNS/{RUN_ID}/experiment.py` — a standalone Python script that:
 - Calls `delta_start()` at the beginning, `delta_done()` at the end
 - Emits `delta_progress()` at milestones (10%, 25%, 50%, 75%, 90%)
 - Emits `delta_metric()` at log intervals (sparse — NOT every step)
-- Logs to `ExperimentLogger` at EVERY step (dense — for analysis)
+- Logs buffered, aggregated metrics at the selected interval with `ExperimentLogger`
 - Uses `flush=True` on ALL print calls (critical for SLURM output buffering)
 
 #### Step 2 — Generate `job.sh`
@@ -508,7 +490,15 @@ echo "Submitted job ${JOB_ID}"
 bash {PROJECT_ROOT}/scripts/wait_for_job.sh ${JOB_ID} {PROJECT_ROOT}/RUNS/{RUN_ID}/slurm-${JOB_ID}.out
 ```
 
-**Do NOT manually poll `squeue -j` or `tail -f` the output file in a loop.** `wait_for_job.sh` already does this with a FIFO-based reader and a 30s safety net for vanished jobs. Repeated `squeue` polling wastes tokens and adds latency. The script blocks until DELTA-SMOKE-DONE / DELTA-DONE / DELTA-BLOCKER, then exits with the right code.
+**Do NOT manually poll `squeue -j` or tail output in an agent loop.** The monitor reads
+bounded log chunks and queries SLURM independently of log activity. Success requires a
+success marker AND scheduler completion with exit code `0:0`; a later rank failure wins.
+Accounting must be available during init. A query failure is unknown state, not evidence
+that a job vanished. Pass the remaining deadline explicitly; the default is three hours.
+
+Exit codes: 0 success, 1 failure/BLOCKER, 2 completed without a success marker, 3 monitor
+timeout, 4 scheduler state unavailable. The monitor never cancels a job. `DELTA-SMOKE-DONE`
+returns success for that stage only; it cannot complete the experiment package.
 
 **For long jobs**, the human-facing observability is wandb. The DELTA markers in stdout give the agent automation signals (start, milestones, done); wandb gives the human a live dashboard with metrics, plots, and ETA. If wandb is enabled, share the run URL with the human at submission time so they can watch progress without reading the SLURM output.
 
@@ -524,7 +514,10 @@ After the job completes:
 If `wait_for_job.sh` exits non-zero (DELTA-BLOCKER, vanished, timeout):
 1. Read the SLURM output file and `RUNS/{RUN_ID}/logs/stderr.log` to diagnose
 2. Common fixes: OOM → reduce batch / enable gradient checkpointing; missing path → check the path is mounted on compute nodes; env activation failed → re-validate against INFRA.md `validated env activation`; CUDA error → check GPU was actually requested
-3. Apply the fix to `experiment.py` or `job.sh`, resubmit. Iterate up to 2-3 times.
+3. Before resubmitting, reconcile the recorded attempt with squeue/sacct. A monitor timeout
+   or query error does not mean the job stopped. Wait for or, when authorized, cancel only
+   that job and verify termination. Preserve its outputs; reserve a new attempt ID with
+   a unique log path under the same R###. Apply the fix and retry up to 2-3 times within budget.
 4. Only escalate to BLOCKER if the failure is structural. Write `RUNS/{RUN_ID}/BLOCKER.md` using `templates/BLOCKER.template.md`; do not write a
    research report, append the Ledger, increment the run count, or allocate a new ID.
 

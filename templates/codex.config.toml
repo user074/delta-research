@@ -1,0 +1,10 @@
+# Merge these keys into the project's .codex/config.toml during initialization.
+# Preserve user overrides and unrelated config. Do not change sandbox/permissions.
+model = "gpt-6-astra"
+model_reasoning_effort = "high"
+
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 2
+default_subagent_model = "gpt-5.6-sol"
+default_subagent_reasoning_effort = "medium"

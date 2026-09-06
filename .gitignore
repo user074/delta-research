@@ -2,3 +2,7 @@ CLAUDE.md
 INFRA.md
 AGENTS.md
 tests/.DS_Store
+# Local execution/evaluation metadata
+.delta-runtime/
+tests/evaluations/
+__pycache__/

@@ -11,8 +11,8 @@ Validates that the agent produces correct outputs at each stage:
 
 Usage:
   python tests/run_tests.py                    # validate existing outputs
-  python tests/run_tests.py --run              # generate outputs with claude, then validate
-  python tests/run_tests.py --run --agent codex  # use codex instead
+  python tests/run_tests.py --run              # generate isolated outputs with Astra/Sol, then validate
+  python tests/run_tests.py --run --agent claude # use Claude/Sonnet instead
   python tests/run_tests.py --review           # LLM reviews outputs against templates
   python tests/run_tests.py --debug            # show parsed data for debugging
 """
@@ -21,6 +21,9 @@ import re
 import sys
 import subprocess
 import argparse
+import json
+import math
+from agent_harness import prepare_workspace, execute, review_verdict, OUTPUTS
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -28,6 +31,8 @@ TESTS = ROOT / "tests"
 SUPERVISOR = ROOT / "templates" / "SUPERVISOR.md"
 
 DEBUG = False
+EVALUATION = None
+OPTIONS = None
 
 # ---------------------------------------------------------------------------
 # Markdown parsing helpers
@@ -1071,11 +1076,11 @@ def validate_framework_contracts() -> TestResult:
     r.check("Loop does not grow beliefs to stay alive",
             "Do not grow the belief space merely to keep the loop alive" in supervisor
             and "does not automatically authorize a mechanism study" in supervisor)
-    # Construct these so the contract probe does not count its own source literal.
-    current_codex_cmd = 'cmd = ["codex", "exec", "--approve' + '-for-me", prompt]'
-    legacy_codex_cmd = current_codex_cmd.replace("--approve-for-me", "--full" + "-auto")
-    r.check("Codex runner uses current automation flag",
-            runner_source.count(current_codex_cmd) == 2 and legacy_codex_cmd not in runner_source)
+    from agent_harness import command_for
+    command = command_for("codex", "gpt-5.6-sol", "medium", ROOT)
+    r.check("Codex runner explicitly routes model and effort",
+            "--approve-for-me" in command and command[command.index("--model") + 1] == "gpt-5.6-sol"
+            and 'model_reasoning_effort="medium"' in command)
 
     return r
 
@@ -1448,7 +1453,6 @@ PROMPTS = {
         "Read the current state from {input}.\n\n"
         "Generate a plan for the next run following Phase 2 (Select delta) and Phase 3 (Create run) rules:\n"
         "- Exclude no-progress work; choose the shortest complete experiment capable of answering one hypothesis\n"
-        "- In this fixture choose belief #3's 8-minute test, not belief #2's 25-minute test\n"
         "- State the primary question, support/contradict fork, minimum complete evidence, and ETA\n"
         "- Keep baseline, treatment, repetitions, and necessary controls/ablations under this one R###\n"
         "- Resources must use exact paths from STATE.md Environment — do not invent paths\n"
@@ -1533,10 +1537,10 @@ PROMPTS = {
 }
 
 
-def run_agent(test_name: str, agent: str = "claude"):
+def run_agent(test_name: str, agent: str = "codex"):
     """Spawn the agent for a test case."""
 
-    templates = ROOT / "templates"
+    templates = SUPERVISOR.parent
 
     if test_name == "initialization":
         prompt = PROMPTS[test_name].format(
@@ -1581,36 +1585,33 @@ def run_agent(test_name: str, agent: str = "claude"):
         print(f"Unknown test: {test_name}")
         return
 
-    print(f"\n--- Running {test_name} with {agent} ---")
-    print(f"Prompt: {prompt[:120]}...")
-
+    model = OPTIONS.model or (OPTIONS.supervisor_model if test_name in
+        ("plan_generation", "state_compression") else OPTIONS.worker_model)
+    effort = OPTIONS.supervisor_effort if test_name in (
+        "plan_generation", "state_compression") else OPTIONS.worker_effort
     if agent == "claude":
-        cmd = ["claude", "-p", prompt, "--allowedTools", "Read,Write,Bash,Edit"]
-    elif agent == "codex":
-        cmd = ["codex", "exec", "--approve-for-me", prompt]
-    else:
-        print(f"Unknown agent: {agent}")
-        return
-
-    timeout_seconds = 600 if test_name == "worker_execution" else 300
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_seconds)
-        if result.returncode != 0:
-            print(f"Agent exited with code {result.returncode}")
-            if result.stderr:
-                print(f"stderr: {result.stderr[:500]}")
-        else:
-            print(f"Agent completed successfully")
-    except FileNotFoundError:
-        print(f"Agent CLI '{agent}' not found in PATH")
-    except subprocess.TimeoutExpired:
-        print(f"Agent timed out after {timeout_seconds}s")
+        model = OPTIONS.model or "sonnet"
+    result = execute(agent, model, effort, EVALUATION, prompt,
+        [TESTS / test_name / name for name in OUTPUTS[test_name]],
+        test_name, OPTIONS.timeout or (600 if test_name == "worker_execution" else 300))
+    return execution_check(test_name, result)
 
 
-def review_agent(test_name: str, agent: str = "claude"):
+def execution_check(label, result):
+    check = TestResult(label)
+    check.check("Agent execution produced fresh outputs", result["ok"], result.get("error", ""))
+    return check
+
+
+def review_agent(test_name: str, agent: str = "codex"):
     """Spawn the agent to review a test output against templates."""
 
-    templates = ROOT / "templates"
+    templates = SUPERVISOR.parent
+    missing = [name for name in OUTPUTS[test_name]
+               if not (TESTS / test_name / name).is_file()]
+    if missing:
+        return execution_check("Review " + test_name,
+            {"ok": False, "error": "missing review inputs: " + ", ".join(missing)})
 
     if test_name == "initialization":
         output = TESTS / "initialization" / "output_INFRA.md"
@@ -1660,7 +1661,7 @@ def review_agent(test_name: str, agent: str = "claude"):
         review_output = TESTS / "slurm_job_generation" / "review_slurm.md"
         if not experiment.exists() and not job.exists():
             print(f"\n--- Skipping review of {test_name}: output files not found ---")
-            return
+            return execution_check(test_name, {"ok": False, "error": "missing review inputs"})
         prompt = REVIEW_PROMPTS[test_name].format(
             supervisor=SUPERVISOR,
             log_protocol=templates / "OBSERVABILITY.md",
@@ -1678,34 +1679,23 @@ def review_agent(test_name: str, agent: str = "claude"):
 
     if not output.exists():
         print(f"\n--- Skipping review of {test_name}: {output.name} not found ---")
-        return
+        return execution_check(test_name, {"ok": False, "error": "missing review output"})
 
-    print(f"\n--- Reviewing {test_name} with {agent} ---")
-
+    verdict_path = review_output.with_suffix(".json")
+    prompt += (f"\nAlso write the machine-readable verdict to {verdict_path}: "
+               '{"passed": true, "issues": []}. Set passed to false and list material '
+               'failures when improvement is needed. Return a concise final message.')
+    model = OPTIONS.model or OPTIONS.review_model
     if agent == "claude":
-        cmd = ["claude", "-p", prompt, "--allowedTools", "Read,Write,Bash,Edit"]
-    elif agent == "codex":
-        cmd = ["codex", "exec", "--approve-for-me", prompt]
-    else:
-        print(f"Unknown agent: {agent}")
-        return
-
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        if result.returncode != 0:
-            print(f"Review agent exited with code {result.returncode}")
-            if result.stderr:
-                print(f"stderr: {result.stderr[:500]}")
-        else:
-            print(f"Review completed → {review_output.name}")
-            # Print the review inline
-            if review_output.exists():
-                print()
-                print(review_output.read_text())
-    except FileNotFoundError:
-        print(f"Agent CLI '{agent}' not found in PATH")
-    except subprocess.TimeoutExpired:
-        print(f"Review agent timed out after 300s")
+        model = OPTIONS.model or "sonnet"
+    result = execute(agent, model, OPTIONS.worker_effort, EVALUATION, prompt,
+                     [review_output, verdict_path], "review_" + test_name,
+                     OPTIONS.timeout or 300)
+    check = execution_check("Review " + test_name, result)
+    if result["ok"]:
+        passed, detail = review_verdict(verdict_path)
+        check.check("Scientific review accepted output", passed, detail)
+    return check
 
 
 # ---------------------------------------------------------------------------
@@ -1713,19 +1703,48 @@ def review_agent(test_name: str, agent: str = "claude"):
 # ---------------------------------------------------------------------------
 
 def main():
-    global DEBUG
+    global DEBUG, TESTS, SUPERVISOR, EVALUATION, OPTIONS
 
     parser = argparse.ArgumentParser(description="Test the research loop agent")
     parser.add_argument("--run", action="store_true", help="Generate outputs by spawning the agent")
     parser.add_argument("--review", action="store_true",
                         help="LLM reviews outputs against templates (checks quality, not just structure)")
-    parser.add_argument("--agent", default="claude", help="Agent CLI to use (claude, codex)")
+    parser.add_argument("--agent", choices=["claude", "codex"], default="codex")
+    parser.add_argument("--model", help="Explicit override for every role in this evaluation")
+    parser.add_argument("--supervisor-model", default="gpt-6-astra")
+    parser.add_argument("--worker-model", default="gpt-5.6-sol")
+    parser.add_argument("--review-model", default="gpt-5.6-sol")
+    parser.add_argument("--supervisor-effort", choices=["low", "medium", "high", "xhigh"], default="high")
+    parser.add_argument("--worker-effort", choices=["low", "medium", "high", "xhigh"], default="medium")
+    parser.add_argument("--output-dir", type=Path, help="New isolated evaluation directory")
+    parser.add_argument("--artifacts-dir", type=Path, help="Validate an earlier evaluation's tests directory")
+    parser.add_argument("--timeout", type=float, help="Per invocation timeout in seconds")
     parser.add_argument("--test", choices=["init", "plan", "worker", "compression", "slurm", "contracts", "all"], default="all",
                         help="Which test to run")
     parser.add_argument("--debug", action="store_true", help="Show parsed table data")
     args = parser.parse_args()
 
     DEBUG = args.debug
+    OPTIONS = args
+    if args.timeout is not None and (not math.isfinite(args.timeout) or args.timeout <= 0):
+        parser.error("--timeout must be positive")
+    if args.artifacts_dir and (args.run or args.review):
+        parser.error("--artifacts-dir is for validation only")
+    if args.output_dir and not (args.run or args.review):
+        parser.error("--output-dir requires --run or --review")
+    if args.artifacts_dir:
+        TESTS = args.artifacts_dir.resolve()
+    if args.run or args.review:
+        EVALUATION = prepare_workspace(ROOT, args.output_dir, review_only=not args.run)
+        TESTS = EVALUATION / "tests"
+        SUPERVISOR = EVALUATION / "delta-research/templates/SUPERVISOR.md"
+        print(f"Evaluation outputs: {EVALUATION}")
+        import hashlib
+        manifest = {"mode": "generated" if args.run else "review_snapshot",
+                    "models": {"supervisor": args.supervisor_model, "worker": args.worker_model,
+                               "review": args.review_model, "override": args.model},
+                    "framework_sha256": hashlib.sha256(SUPERVISOR.read_bytes()).hexdigest()}
+        (EVALUATION / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
     tests_to_run = {
         "init": args.test in ("init", "all"),
@@ -1736,34 +1755,20 @@ def main():
         "contracts": args.test in ("contracts", "all"),
     }
 
-    # Generate outputs if requested
-    if args.run:
-        if tests_to_run["init"]:
-            run_agent("initialization", args.agent)
-        if tests_to_run["plan"]:
-            run_agent("plan_generation", args.agent)
-        if tests_to_run["worker"]:
-            run_agent("worker_execution", args.agent)
-        if tests_to_run["compression"]:
-            run_agent("state_compression", args.agent)
-        if tests_to_run["slurm"]:
-            run_agent("slurm_job_generation", args.agent)
-
-    # LLM review if requested
-    if args.review:
-        if tests_to_run["init"]:
-            review_agent("initialization", args.agent)
-        if tests_to_run["plan"]:
-            review_agent("plan_generation", args.agent)
-        if tests_to_run["worker"]:
-            review_agent("worker_execution", args.agent)
-        if tests_to_run["compression"]:
-            review_agent("state_compression", args.agent)
-        if tests_to_run["slurm"]:
-            review_agent("slurm_job_generation", args.agent)
-
-    # Validate
     results = []
+    names = {"init": "initialization", "plan": "plan_generation", "worker": "worker_execution",
+             "compression": "state_compression", "slurm": "slurm_job_generation"}
+    for short, name in names.items():
+        if not tests_to_run[short]:
+            continue
+        if args.run:
+            generated = run_agent(name, args.agent)
+            results.append(generated)
+            if generated.failed():
+                tests_to_run[short] = False
+                continue
+        if args.review:
+            results.append(review_agent(name, args.agent))
 
     if tests_to_run["init"]:
         results.append(validate_infra(
@@ -1816,6 +1821,10 @@ def main():
         print(f"  (\033[32mall passed\033[0m)")
     print(f"{'='*60}")
 
+    if EVALUATION:
+        summary = {"passed": total_passed, "failed": total_failed,
+                   "checks": {r.name: r.checks for r in results}}
+        (EVALUATION / "results.json").write_text(json.dumps(summary, indent=2) + "\n")
     sys.exit(1 if total_failed > 0 else 0)
 
 

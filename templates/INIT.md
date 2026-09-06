@@ -3,6 +3,9 @@
 > Run this when STATE.md does not exist.
 > The human is present. Use them — they know the project better than any README.
 
+Reuse answers and authorization already provided in this session or project. Ask
+only for missing decisions; do not repeat interviews, GPU counts or permission requests.
+
 ---
 
 ## Step 1: Understand the project and write agent instructions
@@ -57,7 +60,7 @@ Detect which agent is running. Write or update the appropriate instruction file(
 | Agent | Instruction file | Multi-agent config |
 |-------|-----------------|-------------------|
 | Claude Code | `CLAUDE.md` | N/A (Task tool built-in) |
-| OpenAI Codex | `AGENTS.md` | `codex features enable multi_agent` |
+| OpenAI Codex | `AGENTS.md` | Project defaults from `templates/codex.config.toml` |
 | Cursor | `.cursorrules` | N/A |
 
 If unsure, write both `CLAUDE.md` and `AGENTS.md`.
@@ -75,230 +78,39 @@ The file should contain:
   - Common commands: how to run the project, run tests, build, etc. For research projects this might be how to run experiments, launch training, evaluate models
   - Important gotchas, non-obvious conventions, or anything that would trip up a new contributor
   - Avoid: listing every file/directory (easily discovered), generic development practices, information that duplicates README.md verbatim
-- **Research loop** section:
-  - Research question and goals (from interview)
-  - Key constraints (from interview)
-  - One run, one coherent answer: an R### contains the baseline, treatment, required repetitions, essential
-    controls, and verdict-changing ablations for one hypothesis question. Setup and partial conditions are not runs.
-  - Scientific literature search is one-shot direction recovery only after direct work fails and STATE/reports
-    cannot yield another experiment; never while an executable direction exists
-  - Once the human confirms `N` GPUs, every experiment job allocates and gives useful work to all `N`; optimize
-    shortest wall-clock time, prefer DDP whenever one replica fits, and use tensor/model parallelism only when a
-    replica cannot fit or the operation cannot be divided across independent samples
-  - How to run: `To continue research, say: "run the research loop"`
+### Install the compact loop instructions
 
-- **Reference: where to find what** (lookup table — agents should consult this when they need a spec, not guess):
+Append the managed block from `templates/AGENTS.fragment.md` to the project instruction
+file. On updates replace only the block between `delta-research:begin` and
+`delta-research:end`; preserve project-specific instructions, resource paths and recorded
+authorization outside it. The fragment is the canonical compact contract; do not copy
+whole supervisor phases, worker prompts, report scaffolds, or hardware playbooks into
+AGENTS.md/CLAUDE.md. PLAN.md is a working guide, not an immutable contract, normally
+≤5 minutes and always ≤10 minutes to write.
 
-  *delta-research framework specs (read-only — copied into the project as a git submodule, subtree, or directory):*
+For an older unmarked installation, identify the old framework-only rules and reconcile
+them with this fragment while preserving user-specific content. In particular, remove
+obsolete automatic W&B triggers, automatic `at` scheduling and instructions to skip
+publication after compression. Record fragment version v2 in STATE.md Environment.
+Do not rewrite generated `.delta-loop/LOOP.md` or `.delta-loop/POLICY.md`.
 
-  | File | What's in it | When to read |
-  |------|--------------|--------------|
-  | `delta-research/templates/SUPERVISOR.md` | Full 7-phase loop spec, worker prompt template, state compression rules, bandit-based delta ranking, paradigm shift handling | When running the loop, designing a delta, or compressing state |
-  | `delta-research/templates/OBSERVABILITY.md` | DELTA marker protocol, run directory structure (`logs/`, `metrics/`, `checkpoints/`, `artifacts/`, `scripts/`), full logging spec, SLURM execution workflow, failure recovery | When generating `experiment.py` or `job.sh`, debugging a failed run, or interpreting DELTA markers |
-  | `delta-research/templates/WANDB_REPORTS.md` | wandb Report sub-agent spec — triggers, what to read, what to produce, plot quality rules | When a Report trigger fires (paradigm shift, belief resolved, every 5 runs) |
-  | `delta-research/templates/INIT.md` | First-time initialization (interview, env setup, INFRA.md, SLURM test job) | Only when re-initializing — env change, new cluster, etc. |
-  | `delta-research/templates/STATE.template.md` | Structure of STATE.md | When seeding STATE.md from scratch |
-  | `delta-research/templates/PLAN.template.md` | Minimal editable PLAN.md (question, complete evidence package, method/resources, prediction, bounds) | Spend ≤5 minutes normally/≤10 minutes hard, then execute |
-  | `delta-research/templates/REPORT.template.md` | Compact paper-like REPORT.md (Answer, Motivation, Questions, Method, Experiments, Results, Analysis, optional Ablations, Limitations, Conclusion, Reproducibility) | When the worker is writing a report |
-  | `delta-research/templates/BLOCKER.template.md` | Short pending-experiment note; not a report, Ledger row, completed run, or new ID | When bounded repair cannot reach the experiment |
-  | `delta-research/templates/LITERATURE.template.md` | Optional bounded direction-recovery or human-requested brief; not a loop run, belief update, or experiment gate | After eligible one-shot direction failure, or when the human explicitly requests a brief |
-  | `delta-research/templates/LITERATURE_INDEX.template.md` | Optional registry for bounded recovery/human-requested briefs | Only when maintaining optional literature artifacts |
-  | `delta-research/templates/INFRA.template.md` | Structure of INFRA.md (compute, optimization playbook, storage, cluster, job execution) | When (re)building INFRA.md |
-  | `delta-research/scripts/wait_for_job.sh` | Blocking SLURM monitor — tails output for DELTA markers, exits on DONE/BLOCKER, has FIFO read + 30s safety net | Use it directly via `bash scripts/wait_for_job.sh <JOB_ID> <OUTPUT_FILE>`. Never reimplement. |
+For Codex, merge `templates/codex.config.toml` into the project's `.codex/config.toml`
+and install `templates/research-worker.toml` as `.codex/agents/research-worker.toml`.
+Preserve existing explicit user model, effort, permission and other configuration
+choices; keep the two worker-model settings consistent when applying a user override.
+The default is an Astra supervisor and Sol workers at medium effort. Do not silently
+inherit the supervisor's model. Use the current host's supported configuration; if a
+host uses explicit spawn arguments, pass the same model/effort there. Do not downgrade
+or upgrade silently when a configured model is unavailable. Record the effective
+supervisor/worker model and effort in STATE.md Environment.
 
-  *Runtime files (this project's working memory — written and updated by the loop):*
+Current Codex supports `agents.enabled`, `agents.default_subagent_model` and
+`agents.default_subagent_reasoning_effort`; older installations may require the legacy
+`codex features enable multi_agent` switch. Verify the installed CLI before applying
+settings. See the [official subagent configuration](https://learn.chatgpt.com/docs/agent-configuration/subagents).
 
-  | File / dir | What's in it | Owned by |
-  |------------|--------------|----------|
-  | `STATE.md` | Current beliefs, ledger, frontier, environment. **Read first in any research conversation.** | Supervisor (read+write). Workers never touch. |
-  | `INFRA.md` | Hardware profile, optimization playbook, storage paths, cluster config, validated env activation | Init agent (write); supervisor + workers (read) |
-  | `SYNTHESIS.md` | Human-facing narrative — what we've learned and where we are | Supervisor (write at paradigm shift / belief resolution) |
-  | `REPORTS/R###.md` | One compact paper-like report per completed, decision-capable experiment | Worker (write); supervisor (read in Phase 5) |
-  | `RUNS/R###/` | Per-run dir: one editable `PLAN.md`, execution files, logs, metrics, checkpoints, artifacts, and scripts | Supervisor creates a short working guide; worker edits it freely while executing |
-
-  *When in doubt:*
-  - Lost context after compaction? → re-read `STATE.md` (current state) + this CLAUDE.md/AGENTS.md (rules). For phase details, re-read `SUPERVISOR.md`.
-  - Worker crashed? → read `RUNS/R###/logs/stderr.log` + `RUNS/R###/slurm-*.out`, then `OBSERVABILITY.md` Step 5 for recovery patterns.
-  - Don't know which file format? → check `delta-research/templates/<name>.template.md`.
-
-- **Loop discipline** (these are the patterns that get lost after context compaction. CLAUDE.md/AGENTS.md is reloaded every conversation, so put the rules here, not just in SUPERVISOR.md):
-
-  **The 7 phases** (one cycle):
-  1. Read STATE.md (beliefs, ledger, frontier)
-  2. Select one hypothesis question and the shortest complete experiment capable of answering it
-  3. Spend at most 5 minutes normally (10 minutes hard cap) writing one concise, editable
-     `RUNS/R###/PLAN.md`, then start the worker
-  4. Spawn a worker with the plan
-  5. Ingest the worker's REPORT.md
-  6. Compress STATE.md (update beliefs, append ledger, refresh frontier, update SYNTHESIS.md if a paradigm shifted)
-  7. Loop back to phase 1
-
-  **Hard contracts** (do not break these):
-  - Workers NEVER modify STATE.md
-  - `PLAN.md` is a working guide, not an immutable contract. Do not create `PLAN.initial.md`, versions, amendment
-    classes, or approval gates. Workers edit commands, paths, resources, compute, and analyses directly.
-  - Planning is normally ≤5 minutes, always ≤10 minutes, and under 400 prose words. Start when the question,
-    complete evidence package, first command, required resources, and bounds are clear.
-  - The hardware objective is shortest wall-clock time to the complete answer. Once the human confirms `N` GPUs,
-    allocate all `N` and assign useful samples, batches, or independent conditions to each; never leave confirmed GPUs idle.
-  - When one model replica fits on one GPU, use DDP across the confirmed GPUs. Tensor/model parallelism is allowed
-    only for a concrete single-GPU memory or indivisible-operation constraint, which must be stated in the plan/report.
-  - Human-facing communication follows the Feynman test: answer in the first sentence, then exact evidence, plain
-    English meaning, tested scope, and only the limitation that could change the answer. Keep summaries ≤80 words.
-    Use real technical names and numbers, but define unfamiliar terms and never invent jargon or acronyms.
-  - Keep `delta`, `frontier`, `evidence floor`, `paradigm`, `unblocker`, and `belief movement` inside STATE/Meta.
-    Translate them for the human. Do not narrate audits, workflow, or steps that do not affect the answer.
-  - Never erase observed outcomes or portray an outcome-driven scientific change as decided earlier. Record one
-    short Working note only for a material scientific change; mechanical fixes require no audit trail.
-  - Workers do not suggest new research directions. A report names at most one next experiment only when the same
-    primary question remains unresolved.
-  - Workers may repair or substitute resources directly. Note it only when the substitution materially changes
-    interpretation. Use BLOCKER only after practical repair is exhausted or an actual interrupt boundary fires.
-  - One R### is one coherent answer, not one command. Keep baseline, treatment, repetitions, necessary controls,
-    verdict-changing ablations, setup, retries, and analysis in the same run.
-  - A run is complete only when it has the minimum evidence needed to support, contradict, or honestly fail to
-    decide the named hypothesis. Substantial means decision-complete, not artificially large.
-  - Run the highest-signal condition first, but do not close after a trivial subset. Stop after the complete package
-    answers the claim; add no work merely to make a sufficient result look stronger.
-  - When the human's target hypothesis is adequately supported or contradicted, trigger `GOAL` after Phase 6b.
-    Do not invent mechanism studies, broader benchmarks, or new beliefs to keep the loop alive.
-  - Literature review, experiment surveys, audits, gates, cleanup, and refactors are not standalone research runs
-  - Setup, conversion, technical lookup, smoke checks, debugging, retries, seeds, conditions, metrics, controls,
-    ablations, plots, and analysis never receive separate run IDs.
-  - If bounded repair cannot reach decision-capable evidence, write `RUNS/R###/BLOCKER.md`; do not write a research
-    report, append the Ledger, increment `total_runs`, or consume another ID.
-  - On resume, a `RUNS/R###/BLOCKER.md` whose ID is absent from the Ledger is pending work. Retry the same PLAN/ID
-    after the prerequisite is resolved; never allocate a fresh ID to step around it.
-  - A bounded literature direction recovery is allowed at most once between completed experiments, only after a
-    scientific failure and an empty regenerated Frontier. It must yield an experiment or trigger AMBIGUITY.
-
-  **A run is atomic — phases 3–6b are one unit. The cycle ends after the pushed Phase 6b commit, NOT at Phase 4 or state compression alone.**
-  Once the minimal working guide exists (Phase 3), launch the worker. Don't ask for plan approval or permission between submit/wait/sync/report. After the worker writes `REPORTS/R###.md`, you (the supervisor) must immediately, in the same turn:
-  1. **Phase 5 — Ingest the report.** Read `REPORTS/R###.md`. Pull out the answer, method, experiments, results,
-     analysis, scope, conclusion, and reproducibility details.
-  2. **Phase 6 — Compress STATE.md.** Append the Ledger row. Update belief confidences. Refresh the Frontier. Update SYNTHESIS.md briefly if the target resolved or a paradigm shifted. Generate a wandb Report only when the human or active policy explicitly requested one; it never blocks this phase.
-  3. **Phase 6b — Publish.** Curate `.gitignore`, explicitly stage only the run scope, validate, commit on the
-     research branch, push, and verify the remote-tracking branch.
-  4. Then either continue to Phase 1 of the next cycle, or stop **only** at an interrupt boundary.
-
-  **Git publication is Phase 6b and part of the atomic run.** After compression, the supervisor inspects the
-  run-scoped diff, updates `.gitignore`, stages explicit paths only, validates, commits on a non-default research
-  branch, pushes, and verifies the remote-tracking branch. The cycle is not complete and the next cycle cannot
-  start until this succeeds. Never use blanket `git add` or force-push.
-
-  **"The experiment succeeded" is not a mid-cycle stopping condition.** Neither is "the worker wrote the report." A cycle that ends with REPORT.md written but STATE.md unchanged is half done. The expected shape is: *plan → worker executes the minimum decisive test → worker writes the result → supervisor ingests → supervisor updates STATE.md/SYNTHESIS.md → Phase 6b publishes → either `GOAL`, another interrupt, or the next cycle*. Plots and extra analysis are optional. A sufficient support/contradict result triggers `GOAL` only after the completed run is compressed and published.
-
-  **Smoke tests are optional, not gates**: Use one only when the working plan names a concrete costly-run failure
-  risk that a probe can cheaply resolve. Cap it at 10% of the run budget and continue immediately to the
-  measurement when it passes. Otherwise run the experiment directly. Smoke and measurement share one R###;
-  passing the smoke never completes the run. See OBSERVABILITY.md Step 0.
-
-  **SLURM is one unit**: `sbatch` → `bash scripts/wait_for_job.sh ${JOB_ID} {OUTPUT_FILE}` → `wandb sync` (if offline) → write REPORT.md → **Phase 5 (ingest) → Phase 6 (compress STATE.md) → Phase 6b (commit + push + verify)**. No breaks. The moment `wait_for_job.sh` returns, do NOT yield — keep going through Phase 6b in the same turn. Do NOT manually poll `squeue` — `wait_for_job.sh` handles monitoring with FIFO-based reading and a 30s safety net.
-
-  **Failure recovery is part of the run**: If a run hits DELTA-BLOCKER, non-zero exit, or missing output: read logs,
-  diagnose, fix, and re-run under the same ID. Iterate up to 2-3 times. If truly blocked, write `BLOCKER.md` and
-  pause without a completed report, Ledger row, run-count increment, or new ID.
-
-  **Interrupt boundaries** (the ONLY valid reasons to stop the loop):
-  - GOAL — target hypothesis adequately supported or contradicted in the tested scope; no explicit question remains
-  - BUDGET — time/compute budget exceeded
-  - NULL_STREAK — N consecutive completed experiments that cannot decide
-  - STALL — no decision-capable experiment can be specified
-  - BLOCKER — unrecoverable failure
-  - AMBIGUITY — beliefs/frontier can't be updated without human input
-  - IRREVERSIBLE — about to take an action that can't be undone
-
-  **Autonomous operation**: The loop cycles until an interrupt boundary triggers, including `GOAL`; it does not
-  invent follow-up work after the target is decided. Don't emit user-facing summaries between cycles.
-
-  **State compression after each run** (Phase 6):
-  - Append one Ledger row only for the completed coherent experiment: question, decisive result, conclusion, belief
-  - Update the affected belief from the conclusion and evidence strength
-  - Add at most one directly observed belief only when the explicit human goal requires it
-  - Refresh Frontier — remove the completed question; add at most one goal-relevant next experiment with its
-    decision result, minimum complete evidence, total ETA, and blocker
-  - Update SYNTHESIS.md narrative if a paradigm shifted or a belief resolved
-  - Phase 6b: curate `.gitignore`, stage only confirmed run files, commit the atomic run, push the configured
-    research branch, and verify it reached the remote
-
-  **Schedule the next cycle at end of Phase 7** (so the loop is trackable and survives session pauses):
-  - **Claude Code in a `/loop` session**: call `ScheduleWakeup` with the same `/loop` prompt, picking `delaySeconds` based on what's pending (60–270s if waiting on a job to settle, 1200–1800s if idle). Set `reason` to one specific sentence — that's the human's tracking signal.
-  - **Claude Code outside `/loop`**: just return to Phase 1 in the same turn. Do not invent a scheduling call.
-  - **Codex**: use OS-level `at` since `/loop` doesn't exist on Codex —
-    ```bash
-    echo "cd $(pwd) && codex exec --approve-for-me 'continue research loop — read STATE.md and proceed from Phase 1'" \
-        | at now + 30 minutes
-    ```
-    If `at`/`atrun` isn't available, continue in the same session and record the limitation in STATE.md Scratch. See SUPERVISOR.md Phase 7(b) for the full pattern.
-
-  **Wandb Report triggers** (spawn the Report sub-agent — see WANDB_REPORTS.md):
-  - Paradigm shift (core belief rejected, confidence dropped ≥ 0.3)
-  - Belief resolved (reached `supported` or `rejected`)
-  - Every 5 runs (periodic snapshot)
-
-  **Worker spawning**:
-  - Claude Code: `Task(subagent_type="general-purpose", prompt=<filled Worker Prompt Template from SUPERVISOR.md Section 4>)`
-  - Codex: Spawn a sub-agent with the same filled template.
-
-- **File management** rules (large files):
-  - Checkpoints save to `RUNS/{RUN_ID}/checkpoints/` (per-run) or to the cluster checkpoint path from INFRA.md Storage. Add `RUNS/*/checkpoints/` and `checkpoints/` to `.gitignore`.
-  - HuggingFace cache lives at the path from INFRA.md Storage (set `HF_HOME`). Never let it default to `~/.cache/huggingface`.
-  - Datasets are read from the path in INFRA.md Storage — do not download into the project tree.
-
-- **Reporting framework issues**: If you (the agent) find delta-research itself unclear, broken, or missing a feature while running the loop — wrong template field, ambiguous instruction, missing recovery path, etc. — surface it to the human with a one-line summary and suggest opening an issue at https://github.com/user074/delta-research/issues. Don't silently work around the problem; the next user will hit the same one.
-
-For Codex, enable multi-agent once before running the loop:
-```bash
-codex features enable multi_agent
-```
-
-If the user prefers manual configuration instead of the CLI helper, tell them to set:
-```toml
-[features]
-multi_agent = true
-```
-
-For Codex, also add this section to `AGENTS.md` to prevent premature turn-ending:
-
-```markdown
-## Autonomous loop behavior (Codex-specific)
-
-Codex has a default behavior of surfacing progress to the user and closing the turn cleanly after completing work. In the research loop, this is wrong — emitting a user-facing summary between cycles causes Codex to treat it as a turn completion point and stop.
-
-Rules for the research loop:
-- Default to real experimental work: select one hypothesis question and the shortest complete experiment capable
-  of answering it. A new run ID, partial condition, audit, review, or gate is not progress.
-- Treat `PLAN.md` as a disposable working guide: normally spend at most 5 minutes and never more than 10 minutes
-  planning, then execute. Keep one editable plan only; do not create immutable copies, amendment classes, or
-  approval gates. Adapt it during execution and note only material scientific changes made after seeing results.
-- One run is one coherent answer: keep baseline, treatment, repetitions, necessary controls, verdict-changing
-  ablations, setup, retries, and analysis under one R###. Do not close the run after a trivial subset of that package.
-- Substantial means decision-complete, not artificially large. Choose the shortest complete package, stop when it
-  answers the claim, and do not pad it after the conclusion is credible.
-- Optimize wall-clock time to the complete answer. Once the human confirms `N` GPUs, allocate and give useful work
-  to all `N`; report wall-clock, throughput, and a lightweight per-rank work count inside the experiment.
-- If one model replica fits on one GPU, prefer DDP across all confirmed GPUs. Do not use tensor parallelism instead;
-  model/tensor sharding requires a concrete single-GPU memory or indivisible-operation constraint.
-- `GOAL` is a valid terminal boundary. Once the human's target hypothesis is adequately supported or contradicted
-  and the run is compressed/published, stop; do not invent mechanism studies or broader tests to keep cycling.
-- Communicate like a clear technical colleague: result first, decisive numbers second, then only the technical
-  detail needed to understand or reproduce it. Define unfamiliar terms in plain English. Do not use made-up
-  acronyms, internal loop jargon, abstract management language, or process narration in user-facing text.
-- Do not create standalone literature-review, experiment-survey, generic audit/gate, cleanup, refactor, setup,
-  smoke, retry, seed, condition, baseline, control, ablation, plot, or analysis runs.
-- Do not search scientific literature while a direct experiment exists. Use at most one 30-minute/8-source
-  direction recovery only after direct work fails and STATE/reports cannot yield another direction. It must produce
-  an executable direct experiment or trigger `AMBIGUITY`; it cannot repeat until new direct evidence exists.
-- If bounded setup/repair cannot reach the experiment, write `RUNS/R###/BLOCKER.md` and pause. Do not create a
-  research report, Ledger row, run-count increment, or new ID.
-- Do NOT emit user-facing progress messages between cycles. No "here's what I found so far." No "completed R003, ready for next pass."
-- Do NOT treat "substantial progress" as a reason to yield control. The interrupt boundaries in STATE.md Policy are the ONLY valid reasons to stop.
-- "Keep experiments fast" means minimize time to a credible answer. It does not mean splitting one experiment
-  across many trivial run IDs.
-- **A cycle ends after Phase 6b is pushed and verified, not at Phase 4 (worker done), Phase 5 (report read), or Phase 6 (state compressed).** When the worker finishes, immediately ingest, compress, curate/stage/validate, commit, push, and verify in the same turn. "The experiment succeeded" and "STATE.md is updated" are not stopping conditions.
-- After updating STATE.md (Phase 6), go directly through Phase 6b, then back to Phase 1. Do not produce user-facing output between these steps.
-- The only time you talk to the human is when an interrupt boundary fires.
-```
+Use `templates/RUNTIME.md` for journal setup and host-specific continuation. Record the
+human's cumulative deadline once and preserve it through retries and resumed sessions.
 
 ---
 
@@ -669,9 +481,11 @@ The init agent should set `DELTA_STORAGE_PATHS` in the test job script as a colo
 3. Set `#SBATCH --output={PROJECT_ROOT}/RUNS/test_slurm-%j.out` (absolute path — resolved before any commands run)
 4. Add `export PROJECT_ROOT={project_root}` and `export DELTA_STORAGE_PATHS={colon-separated paths from INFRA.md Storage}` to the job script
 5. Submit: `JOB_ID=$(sbatch --parsable {PROJECT_ROOT}/RUNS/test_job.sh)`
-6. Monitor: `bash scripts/wait_for_job.sh ${JOB_ID} {PROJECT_ROOT}/RUNS/test_slurm-${JOB_ID}.out 600`
+6. Monitor: `bash {FRAMEWORK_ROOT}/scripts/wait_for_job.sh ${JOB_ID} {PROJECT_ROOT}/RUNS/test_slurm-${JOB_ID}.out 600`
 
 **On failure:**
+- If monitoring times out or accounting is unknown, reconcile the existing job first;
+  do not resubmit while it may still be running. Preserve a unique log for each attempt.
 - Read the full output — diagnose what failed
 - Common fixes by env manager:
   - **conda/mamba**: use absolute path (`source /opt/conda/etc/profile.d/conda.sh && conda activate <env>`) — `conda activate` alone often fails under sbatch because `.bashrc` isn't sourced
@@ -689,12 +503,14 @@ The init agent should set `DELTA_STORAGE_PATHS` in the test job script as a colo
 - Set INFRA.md `Job Execution → mode: slurm`
 
 **Wrap up:**
-- Record everything in STATE.md Environment section
-- Update CLAUDE.md/AGENTS.md with environment-specific commands and paths (so future sessions don't need to re-discover them)
+- The environment worker writes INFRA.md and returns a compact summary with exact commands and paths.
+- The supervisor records the Environment section in STATE.md and updates project-specific
+  commands in CLAUDE.md/AGENTS.md; the environment worker does not edit these shared files.
 
 **Agent-specific spawning:**
-- **Claude Code**: `Task(subagent_type="general-purpose", prompt="Set up and verify the research environment. <details from interview>. Record in STATE.md Environment section.")`
-- **Codex**: Spawn a sub-agent for environment setup.
+- **Claude Code**: `Task(subagent_type="general-purpose", model="sonnet", prompt="Set up and verify the research environment. <details from interview>. Write INFRA.md and return the environment summary to the supervisor.")`
+- **Codex**: Spawn environment setup with explicit `gpt-5.6-sol` / `medium`, or the
+  configured cheaper worker. Pass only the interview answers, exact paths and setup scope.
 
 The environment can be re-invoked later (new model, GPU change) without touching research state.
 
@@ -723,9 +539,10 @@ The research loop runs shell commands (python scripts, data processing, etc.). C
 ```
 For full autonomy (if the human agrees), use `"allow": ["Bash(*)"]`. The active Python env (conda/uv/venv) is the safety boundary — package installs land there, not system-wide.
 
-**Codex** — runs in a sandboxed container by default, so permissions are less of a concern. Use `--approve-for-me`
-when launching automated work. Ensure the container image has the right Python env (conda/uv/venv) and
-dependencies pre-installed, or let the agent install them.
+**Codex** — use the host's configured sandbox and `--approve-for-me` for automatic
+approval review when available. Verify access to the project and shared storage. Prepare
+the required Python environment and dependencies during init; do not assume a container
+or change permissions to bypass a failed approval review.
 
 **Other agents** — configure equivalent auto-approval for shell commands per the agent's docs.
 
@@ -740,11 +557,12 @@ Separately ask whether the loop is authorized to stage, commit, and push after e
 distinct external-write actions; record the answer in STATE.md Environment and CLAUDE.md/AGENTS.md. If authorized:
 
 - Inspect `git remote -v`, current/default branches, working-tree status, and GitHub authentication.
-- Configure a non-default research branch (for example `research-loop`) for run commits. Do not commit run work
+- Configure a non-default research branch (for example `codex/research-loop`) for run commits. Do not commit run work
   directly to the default branch.
 - Record the exact remote and research branch in STATE.md.
-- Add the Phase 6b contract from `SUPERVISOR.md` to agent instructions: explicit path staging, `.gitignore` curation,
-  test/diff/secret/size checks, atomic run commit, push and verification, no force-push.
+- Reference the Phase 6b contract from the managed instruction fragment. Add
+  `.delta-runtime/` to the project gitignore; operational state remains local. Keep
+  explicit staging, relevant checks, atomic run commit, verified push and no force-push.
 - If authorization is declined or manual, Phase 6b stops at `IRREVERSIBLE` and asks before each commit/push.
 
 ---
@@ -780,4 +598,6 @@ new observation that could change one of them? Is the first experiment the short
 Anything missing from the environment setup? Are permissions configured correctly? Is the Git remote/research
 branch correct, and is the recorded commit/push authorization accurate?
 
-Once confirmed, tell the human: *"To start the research loop, say: run the research loop"*. The agent will then read `templates/SUPERVISOR.md` and begin cycling.
+Validate `squeue` and `sacct` access in SLURM mode; the monitor requires accounting
+completion and exit status. Confirm the installed Python can run the standard-library
+helpers. Then, once confirmed, tell the human: *"To start the research loop, say: run the research loop"*. The agent will then read `templates/SUPERVISOR.md` and begin cycling.

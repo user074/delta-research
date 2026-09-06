@@ -71,7 +71,8 @@ Each Report is a versioned snapshot — preserves how understanding evolved:
 
 After saving: `report.save()`
 
-Record the URL in `SYNTHESIS.md` under a `## wandb Reports` section.
+Return the URL and snapshot run ID to the supervisor in a concise completion message.
+Never edit STATE.md or SYNTHESIS.md; the supervisor alone records the URL.
 
 ---
 
@@ -93,6 +94,9 @@ Task(
 
 `run_in_background=True` is **required** — without it the Task call blocks the supervisor until the report finishes, defeating the point of a side-channel snapshot. The supervisor continues the loop immediately after spawning; it'll be notified when the sub-agent completes (do not poll). Pick up the report URL from the completion notification and append it to `SYNTHESIS.md → ## wandb Reports`.
 
-**Codex:** Spawn the sub-agent with the same prompt, also detached so the loop continues.
+**Codex:** Spawn asynchronously with explicit `gpt-5.6-sol` / `medium` (or the
+project's configured cheaper worker). Use fresh compact context: snapshot run ID, version,
+required report/metrics paths and this spec. Do not inherit Astra or fork all conversation
+history. Return at most 200 words plus the report URL. Do not modify shared summaries.
 
 **Other agents:** Execute inline if sub-agents aren't available, or skip.

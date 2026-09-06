@@ -2,7 +2,7 @@
 
 > This file is the complete specification for running the research loop.
 > An LLM agent reads this file and acts as both supervisor and worker spawner.
-> There are no scripts. The agent IS the orchestrator.
+> The agent makes scientific decisions; small Python helpers persist execution and monitor jobs.
 >
 > For initialization (first-time setup), see `templates/INIT.md`.
 
@@ -74,6 +74,12 @@ The human has already authorized the loop by telling you to run it.
 
 ### Phase 1: Read state
 
+Read `.delta-loop/LOOP.md` at the start of every cycle when present. Follow its active
+policy and handoff rules without editing generated LOOP.md or POLICY.md. Claim the
+operational journal and reconcile pending work using `templates/RUNTIME.md` before
+selecting an experiment. Check the cumulative deadline and user stop requests now and
+before every launch. A side question or progress update does not end authorized work.
+
 Read `STATE.md`. Parse:
 - **BeliefState**: current beliefs, confidence, and status
 - **Ledger**: history of completed, decision-capable experiments
@@ -89,7 +95,8 @@ Read `STATE.md`. Parse:
   pre-run HEAD. Confirm GitHub authentication/read access before expensive work. Never let unrelated dirty files
   leak into a run commit.
 
-Next run ID = highest Ledger run + 1 (or R001 if empty). Before selecting new work, check whether that ID already
+After reconciling the journal, any unpublished Ledger entries, existing reports and active jobs,
+next run ID = highest Ledger run + 1 (or R001 if empty). Before selecting new work, check whether that ID already
 has `RUNS/R###/PLAN.md` plus `BLOCKER.md` but no Ledger row. That is a pending experiment, not an abandoned run.
 When the blocker is resolved, remove/replace the blocker note and resume the same plan, worker, and ID. If it is not
 resolved, trigger `BLOCKER` again; never allocate a new ID to step around it.
@@ -213,27 +220,39 @@ the new direct experiment to the next cycle. Stop only at an actual interrupt bo
 
 ### Phase 4: Spawn worker
 
-Assemble the Experiment Worker Prompt (Section 4) and spawn one worker. The complete experiment and its necessary
+Assemble a compact handoff to the Experiment Worker Prompt (Section 4) and spawn one worker. The complete experiment and its necessary
 supporting steps stay with the same worker under the same run ID. A successful command or `[DELTA-DONE]` marker does
 not complete the run while another planned condition, control, ablation, or analysis remains.
 
-**Agent-specific spawning:**
-- **Claude Code**: `Task(subagent_type="general-purpose", model="sonnet",prompt=<worker prompt>)`
-- **Codex**: Spawn a sub-agent with the worker prompt. Codex handles orchestration natively — it spawns the thread, waits for results, and surfaces the output. The sub-agent runs in the same sandbox with the same file access. Instruct it to read the PLAN, execute, and write the REPORT.
-- **Other agents**: Execute the worker prompt directly. Follow the same contract — execute the plan, write the report, don't touch STATE.md.
+**Model routing and handoff:**
+- Codex supervisor defaults to `gpt-6-astra`; worker, environment and requested report
+  subagents default to `gpt-5.6-sol` with `medium` effort. Honor explicit project/user
+  overrides. Use `research_worker` from `templates/research-worker.toml`, or explicit
+  supported spawn model/effort arguments with fresh context. Never silently inherit
+  Astra or substitute a different model when the selected worker is unavailable.
+- Install the project defaults from `templates/codex.config.toml` during init. Nested
+  helpers, when useful and authorized, use the same explicit cheaper routing. Default
+  to one experiment owner; do not spawn additional reviewers or helper chains routinely.
+- Pass the question, run/owner IDs, plan path, exact resources, relevant environment
+  details, bounds and output paths. Do not fork the whole supervisor history or paste
+  full reports/playbooks. Load only relevant sections. Reuse the worker for this run.
+- Escalate a precise unresolved issue to the existing supervisor after bounded diagnosis;
+  return the error, attempted fixes and relevant file paths. Preserve completed work.
+- Worker completion messages are at most 200 words plus paths/exact errors; the report
+  remains the full record. Use scripts for monitoring, aggregation and bookkeeping.
+- Claude Code: use a Sonnet worker (`Task(subagent_type="general-purpose", model="sonnet",
+  prompt=<compact handoff>)`) unless the project specifies otherwise.
+- Hosts without subagents: execute the worker contract inline with explicit role separation;
+  do not modify scientific STATE.md until the supervisor ingestion phase.
 
-**Codex multi-agent setup** (during init, add to project config or `codex.toml`):
-```toml
-[features]
-multi_agent = true
-
-[agents.worker]
-description = "Research worker: uses the editable PLAN.md as a short guide, adapts it while executing, writes a structured report, and never modifies STATE.md."
-```
+Record effective model/effort and token usage when exposed, including failures and retries.
+Reduce total model cost per valid experiment while meeting scientific adequacy and the
+approved wall-clock/compute bounds; never reduce the required evidence to save tokens.
 
 ### Phase 5: Ingest report
 
-Read `REPORTS/R###.md`. Extract:
+Read `REPORTS/R###.md`. Reconcile its run ID against the Ledger before updating beliefs:
+if already compressed, resume publication without applying the result twice. Extract:
 - Answer: supports, contradicts, or cannot decide, with the decisive number
 - Motivation and the primary question tested
 - Method: approach, data, comparisons, metrics, repetitions, environment, parallel execution, and material scientific changes
@@ -266,9 +285,19 @@ Update STATE.md (see Section 5 for rules):
   (3) 5+ runs since last update. Record the result, adequacy, and scope; do not expand into a new review.
 - Update Meta (run count, date)
 
+Build the complete updated STATE.md in a temporary sibling file and replace STATE.md
+atomically after validation (for example, with Python's `os.replace`). Never append the
+Ledger separately from belief and Meta updates. On resume, an existing Ledger row means
+compression is already applied. Check whether a triggered SYNTHESIS.md update remains
+unfinished and refresh it from the saved state/report before publication, without
+reapplying belief changes. Replace SYNTHESIS.md atomically as well.
+
 #### Phase 6b: Curate, commit, and push the completed run
 
-Phase 6b is mandatory for every completed run. Human authorization to commit
+Phase 6b is mandatory for every completed run. Record reported/compressed/committed/published
+phases with `scripts/loop_runtime.py` as described in `templates/RUNTIME.md`. If publication
+fails, preserve the report, Ledger and run count; resume this same commit/publication step.
+Do not allocate another ID or repeat measurements to recover a Git failure. Human authorization to commit
 and push must be recorded in project instructions or obtained explicitly; initialization should ask for it. If
 authorization is absent, stop at `IRREVERSIBLE` before the first commit/push. Never infer permission to publish.
 
@@ -317,23 +346,13 @@ or schedule continuation while the completed run exists only locally.
 **(a) Confirm Phase 6b succeeded, then evaluate interrupt boundaries** (Section 6). If any trigger → stop and
 report to human. A local-only completed run is a BLOCKER, not a successful cycle boundary.
 
-**(b) Schedule the next cycle.** Even when no interrupt fires, the loop should self-schedule a wakeup before yielding. This keeps progress trackable, lets the human interject between cycles, and survives session pauses. The default cadence is short — pick a delay that matches what's pending (e.g. ~60s when no external job is in flight; longer when a slow SLURM job or remote API is the bottleneck).
+**(b) Continue immediately** to Phase 1 in the current session when work is available.
+For an external wait, persist the pending job, owner and deadline before yielding. Use the
+host-specific continuation rules in `templates/RUNTIME.md`: native same-task scheduling
+when available and authorized; an explicitly configured scheduler on CLI-only hosts.
+Do not install `at`, create automatic OS jobs, or launch another supervisor by default.
+Every resumed session must claim and reconcile the journal before any submission.
 
-Agent-specific:
-
-- **Claude Code, inside a `/loop` dynamic session** (the supervisor was started via `/loop run the research loop` with no interval): call the `ScheduleWakeup` tool at the end of every cycle. Pass the same `/loop` prompt verbatim so the next firing re-enters the supervisor at Phase 1. Choose `delaySeconds` based on what you're waiting on (60–270s if a job is about to settle; 1200–1800s if genuinely idle). Set `reason` to one short specific sentence (e.g. `"checking R042 SLURM job, ~5min remaining"`) — this is shown to the human as the tracking signal.
-- **Claude Code, NOT inside `/loop`**: continue to Phase 1 in the same turn. Do not invent a scheduling call.
-- **Codex**: use the OS scheduler via `at`. Codex has no `/loop` equivalent, so this is the parallel mechanism — `at` runs a fresh `codex exec` at the scheduled time, achieving the same "wake up later and resume" behavior.
-
-  ```bash
-  # Schedule next cycle in 30 minutes (adjust delay as needed)
-  echo "cd $(pwd) && codex exec --approve-for-me 'continue research loop — read STATE.md and proceed from Phase 1'" \
-      | at now + 30 minutes
-  ```
-
-  Requires `at` (Linux) or `atrun` enabled (macOS: `sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.atrun.plist`). If `at` is unavailable, fall back to continuing in the same session and note the limitation in STATE.md Scratch.
-
-**(c) Then return to Phase 1** (or yield, if you scheduled a deferred wakeup in step b).
 
 ---
 
@@ -389,8 +408,8 @@ Agent-specific:
 - Spends more than 10 minutes planning or delays execution to make a plan comprehensive
 - Forces a new run merely because commands, methods, resources, or the working plan changed
 - Skips state compression
-- Runs experiments directly (always spawn a worker)
-- Manages environment directly (spawn environment agent)
+- Runs experiments directly when a configured worker is available; inline fallback follows the same worker contract
+- Rebuilds the environment mid-run; use initialized dependencies and bounded activation/path repair
 - Stages unrelated files, uses blanket `git add`, force-pushes, or starts another run before the previous run's
   commit is verified on the remote
 
@@ -408,9 +427,11 @@ Agent-specific:
 
 ### Experiment Worker Prompt Template
 
-> Supervisor fills `{PLAN_CONTENT}`, `{RUN_ID}`, `{ENV_SETUP}`, and `{INFRA_PLAYBOOK}` before spawning.
+> Supervisor fills `{PLAN_PATH}`, `{RUN_ID}`, `{OWNER}`, `{ENV_SETUP}`, and `{INFRA_REFERENCES}` before spawning.
 > `{ENV_SETUP}` comes from the Environment section of STATE.md.
-> `{INFRA_PLAYBOOK}` comes from INFRA.md (Optimization Playbook + Storage Guidance + GPU table). If INFRA.md doesn't exist, omit the Hardware & Optimization section entirely.
+> `{INFRA_REFERENCES}` gives the absolute INFRA.md path and only the section names relevant to this run.
+> Pass paths and a short task brief; the worker reads this contract and the referenced files.
+> Do not paste the whole plan, playbook, or supervisor history into the handoff.
 
 ```
 You are a research Worker executing a single experiment run.
@@ -421,19 +442,23 @@ Before running any commands, activate the project environment:
 {ENV_SETUP}
 
 Verify the environment is correct before proceeding (e.g. `which python`, quick import check).
-If a package is missing, install it using the project's env manager (`pip install <pkg>` inside an active conda/venv; `uv pip install <pkg>` or `uv add <pkg>` for uv projects; `pixi add <pkg>` for pixi). In SLURM mode, install on the login node into the target env — compute nodes mount the same filesystem and load the same env (verify `which python` resolves to the same absolute path on both).
+Required dependencies should be installed during init. In SLURM mode, repair a wrong
+activation or path within the existing environment; a genuinely missing runtime dependency
+is a BLOCKER, not permission to install on compute nodes. In direct mode, bounded
+installation in the authorized project environment may stay inside the run.
 
 ## Hardware & Optimization
 
-{INFRA_PLAYBOOK}
+Read the relevant sections only: {INFRA_REFERENCES}
 
 ## Your plan
 
-{PLAN_CONTENT}
+Read and execute {PLAN_PATH}. Run: {RUN_ID}. Runtime owner: {OWNER}.
 
 ## Contract (strict)
 
-- NEVER modify STATE.md
+- NEVER modify STATE.md or SYNTHESIS.md
+- Read `templates/RUNTIME.md`; record attempts and reconcile existing jobs before any retry.
 - Treat `PLAN.md` as an editable working guide. Change commands, paths, compute, resources, and analysis directly;
   do not ask for plan approval or stop merely because the plan changed.
 - Add one short Working note only when the scientific comparison or interpretation materially changes. State
@@ -506,7 +531,7 @@ diagnose, edit the working plan/code as useful, and re-run. Iterate up to 2-3 ti
 
 For both modes, follow `templates/OBSERVABILITY.md`:
 - Set up the run directory: `mkdir -p RUNS/{RUN_ID}/logs RUNS/{RUN_ID}/metrics RUNS/{RUN_ID}/artifacts`
-- Write full logs to `logs/` and structured metrics to `metrics/` (every step)
+- Write buffered logs to `logs/` and structured metrics to `metrics/` at the chosen log interval; preserve final decision metrics
 - Emit DELTA markers to stdout (sparse milestones for automation)
 - Save artifacts (plots, checkpoints) to `artifacts/`, scripts to `scripts/`
 
@@ -531,58 +556,11 @@ Write your report to REPORTS/{RUN_ID}.md. The report must be HUMAN-READABLE — 
 
 ### Report structure:
 
-# REPORT — {RUN_ID}: <plain-English question>
+Use `templates/REPORT.template.md` as the only report scaffold. Do not copy its schema
+into other instruction files. Include only decision-relevant data inline; large raw
+histories remain in the metrics files. Record the exact reproducible command, execution
+attempts, effective worker model/effort and usage when available.
 
-## Answer
-<supports, contradicts, or cannot yet decide; decisive number; meaning; one limitation; at most 80 words>
-
-## Motivation
-<why the question matters and what was uncertain>
-
-## Questions tested
-1. **Primary:** <question and decision threshold>
-2. **Secondary, if needed:** <only a question required to interpret the primary result>
-
-## Method
-<approach, data, comparisons, metrics, repetitions, environment, parallel execution, and material scientific changes>
-
-## Experiments
-| Experiment | Why it is needed | Comparison / conditions |
-|------------|------------------|-------------------------|
-| Main test | Answers the primary question | <baseline vs treatment> |
-| <control/ablation if needed> | <alternative ruled out> | <conditions> |
-
-## Results
-| Experiment / condition | Primary result | Uncertainty / repetitions | Meaning |
-|------------------------|----------------|---------------------------|---------|
-| <condition> | <number> | <spread / N> | <interpretation> |
-
-- **wall-clock to answer:** <launch-to-complete-results time; include queue/setup when known>
-- **GPU use, if applicable:** <N/N confirmed GPUs; per-rank work and throughput; peak memory or sampled utilization when already available>
-
-## Analysis
-<direct answers to the questions and why the evidence supports them>
-
-## Ablations (optional)
-<only verdict-changing ablations; delete when none>
-
-## Limitations and tested scope
-<exact scope and only limitations that could reverse the conclusion>
-
-## Conclusion
-- **answer:** <supports | contradicts | cannot decide> hypothesis/belief #N
-- **decisive evidence:** <exact result>
-- **confidence:** <before → proposed after, with reason>
-- **next experiment:** <None, or one experiment for the same unresolved question>
-
-## Reproducibility
-- **parallelism:** <launcher, world size, and global/per-device batch or condition placement>
-- **command:** <exact command or job ID>
-- **metrics:** <path>
-- **artifacts:** <only useful paths>
-
-## Meta
-<run ID, timestamps, execution mode, SLURM job ID, wandb URL>
 ```
 
 ---
@@ -670,12 +648,14 @@ After updating beliefs and before updating Frontier, check for cascading impact:
 | `BUDGET` | Cumulative time exceeds policy max | Stop. Report what was learned. |
 | `NULL_STREAK` | N consecutive completed experiments cannot decide | Stop. The current approach is not answering the question. Suggest one new direction. |
 | `STALL` | No decision-capable experiment can be specified | Stop before spending more compute. Explain what is missing. |
-| `BLOCKER` | The selected experiment cannot proceed after bounded repair, or Phase 6b cannot safely commit/push | Keep the run ID pending. Do not create a research report or Ledger row. Present the exact error and missing prerequisite; never force-push. |
+| `BLOCKER` | Experiment cannot proceed after bounded repair, or publication fails | Execution failure keeps the ID pending without a report/Ledger row. Publication failure preserves the completed report/Ledger and retries the existing commit. Present the exact error; never force-push. |
+| `POLICY` | Active Delta Loop or host policy requires stopping | Preserve pending work and explain the applicable policy boundary. |
 | `AMBIGUITY` | Frontier empty AND can't regenerate | Stop. Ask human for new hypotheses. |
 | `IRREVERSIBLE` | Next delta requires irreversible action | Pause. Get human approval. |
 
 When any interrupt triggers:
-1. Note it in Scratch section of STATE.md
+1. Note it in Scratch section of STATE.md, except a publication failure after commit:
+   use `runtime note --text "exact publication error"` so the committed state remains stable.
 2. Tell the human in plain English, normally within 150 words: answer/blocker first; up to three concrete evidence
    bullets; the tested scope or exact error; and one next action only when input is required. Translate the boundary
    name instead of making the human decode loop jargon.
@@ -690,7 +670,7 @@ Do not trigger a report merely because a belief resolved or five runs elapsed. S
 
 The sub-agent reads `templates/WANDB_REPORTS.md` for the full spec. The supervisor passes: version number, project name, and latest run ID.
 
-**Must run in background.** On Claude Code, this means `Task(..., run_in_background=True, ...)`; on Codex, spawn the sub-agent detached. Without that, the Task call blocks the supervisor and stalls the loop. The supervisor proceeds to Phase 1 of the next cycle immediately after spawning — it does not wait for the Report URL. The completion notification arrives later; record the URL in STATE.md Scratch and SYNTHESIS.md when it does.
+**Must run in background.** On Claude Code, this means `Task(..., run_in_background=True, ...)`; on Codex, spawn a Sol sub-agent asynchronously with a compact handoff and explicit model/effort. Without that, the Task call blocks the supervisor and stalls the loop. The supervisor proceeds to Phase 1 of the next cycle immediately after spawning — it does not wait for the Report URL. The completion notification arrives later; record the URL in STATE.md Scratch and SYNTHESIS.md when it does.
 
 Track versions in STATE.md Scratch:
 ```

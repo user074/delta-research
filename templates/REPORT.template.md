@@ -87,5 +87,8 @@
 - **started**: (timestamp)
 - **completed**: (timestamp)
 - **execution**: (direct | slurm)
+- **attempts**: (attempt IDs, job/process IDs and status/evidence paths, including failed attempts)
+- **worker model / effort**: (effective values)
+- **model usage**: (input/cached/output tokens when exposed, including retries; unavailable otherwise)
 - **slurm_job_id**: (job ID, if applicable)
 - **wandb_run**: (URL, if applicable)

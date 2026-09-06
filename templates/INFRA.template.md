@@ -9,6 +9,8 @@
 
 ## Compute
 
+- **framework root**: (absolute installed delta-research directory; helpers live in scripts/)
+
 ### GPUs
 <!-- One row per GPU. If no GPUs, write "N/A — CPU only" and skip GPU-related playbook sections. -->
 
@@ -142,7 +144,7 @@
    for step, batch in enumerate(loader):
        loss = model(batch)
        running_loss += loss.detach()
-       if step % log_interval == 0:
+       if (step + 1) % log_interval == 0:
            avg_loss = (running_loss / log_interval).item()  # single sync
            running_loss.zero_()
    ```
